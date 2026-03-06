@@ -1,0 +1,269 @@
+<UserControl x:Class="w_finder.Views.FinderPaneView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{DynamicResource PaneBackground}"
+             FontFamily="Segoe UI">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+
+        <!-- Flat ListBox style (no border, themed background) -->
+        <Style x:Key="ThemedListBox" TargetType="ListBox">
+            <Setter Property="Background" Value="{DynamicResource ListBackground}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
+
+        <!-- ListBoxItem with hover/selected states -->
+        <Style x:Key="ThemedListBoxItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
+                                BorderThickness="0,0,0,1"
+                                BorderBrush="{DynamicResource SeparatorBrush}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource ItemHoverBackground}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource ItemSelectedBackground}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Star toggle button -->
+        <Style x:Key="StarButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Width" Value="28"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="{DynamicResource StarInactive}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="4"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource ItemHoverBackground}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsFavorite}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource StarActive}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Search box style -->
+        <Style x:Key="SearchBoxStyle" TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource SearchBoxBackground}"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SearchBoxBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3"
+                                x:Name="border">
+                            <Grid>
+                                <!-- Placeholder text -->
+                                <TextBlock x:Name="Placeholder"
+                                           Text="Search views, sheets, families..."
+                                           Foreground="{DynamicResource SearchBoxPlaceholder}"
+                                           Margin="10,0,0,0"
+                                           VerticalAlignment="Center"
+                                           FontSize="13"
+                                           Visibility="Collapsed"/>
+                                <ScrollViewer x:Name="PART_ContentHost"
+                                              Margin="2,0"
+                                              VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter TargetName="border" Property="BorderBrush"
+                                        Value="{DynamicResource SearchBoxBorderFocus}"/>
+                            </Trigger>
+                            <Trigger Property="Text" Value="">
+                                <Setter TargetName="Placeholder" Property="Visibility"
+                                        Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Theme toggle button -->
+        <Style x:Key="ThemeToggleButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryText}"/>
+            <Setter Property="ToolTip" Value="Toggle light/dark mode"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="3"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource ItemHoverBackground}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </UserControl.Resources>
+
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Search row: search box + theme toggle -->
+        <DockPanel Grid.Row="0">
+            <Button x:Name="ThemeToggleBtn"
+                    DockPanel.Dock="Right"
+                    Style="{StaticResource ThemeToggleButton}"
+                    Content="&#x263C;"
+                    Margin="4,0,0,0"
+                    Click="ThemeToggle_Click"/>
+            <TextBox x:Name="SearchBox"
+                     Style="{StaticResource SearchBoxStyle}"
+                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
+        </DockPanel>
+
+        <!-- Status bar -->
+        <TextBlock Grid.Row="1"
+                   Margin="4,6,4,2"
+                   FontSize="11"
+                   Foreground="{DynamicResource InactiveText}"
+                   Text="{Binding StatusText}"/>
+
+        <!-- Favorites section -->
+        <Border Grid.Row="2"
+                Margin="0,4"
+                Background="{DynamicResource FavoritesBackground}"
+                CornerRadius="3"
+                Visibility="{Binding HasFavorites, Converter={StaticResource BoolToVisibility}}">
+            <Expander IsExpanded="True" Margin="4">
+                <Expander.Header>
+                    <TextBlock Text="FAVORITES"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource ExpanderHeaderText}"/>
+                </Expander.Header>
+                <ListBox x:Name="FavoritesList"
+                         Style="{StaticResource ThemedListBox}"
+                         Background="{DynamicResource FavoritesBackground}"
+                         ItemContainerStyle="{StaticResource ThemedListBoxItem}"
+                         ItemsSource="{Binding Favorites}"
+                         SelectedItem="{Binding SelectedItem}"
+                         MaxHeight="200"
+                         MouseDoubleClick="ResultsList_MouseDoubleClick">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel>
+                                <Button Content="{Binding FavoriteIcon}"
+                                        DockPanel.Dock="Right"
+                                        Style="{StaticResource StarButton}"
+                                        Click="ToggleFavorite_Click"
+                                        Tag="{Binding}"/>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Name}"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource PrimaryText}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding Category}"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource SecondaryText}"
+                                               Margin="0,1,0,0"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Expander>
+        </Border>
+
+        <!-- Results list -->
+        <ListBox x:Name="ResultsList"
+                 Grid.Row="3"
+                 Style="{StaticResource ThemedListBox}"
+                 ItemContainerStyle="{StaticResource ThemedListBoxItem}"
+                 ItemsSource="{Binding Results}"
+                 SelectedItem="{Binding SelectedItem}"
+                 MouseDoubleClick="ResultsList_MouseDoubleClick">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <DockPanel>
+                        <Button Content="{Binding FavoriteIcon}"
+                                DockPanel.Dock="Right"
+                                Style="{StaticResource StarButton}"
+                                Click="ToggleFavorite_Click"
+                                Tag="{Binding}"/>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Name}"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource PrimaryText}"
+                                       TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding Category}"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource SecondaryText}"
+                                       Margin="0,1,0,0"/>
+                        </StackPanel>
+                    </DockPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Grid>
+
+</UserControl>

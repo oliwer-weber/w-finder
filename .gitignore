@@ -1,0 +1,19 @@
+# Visual Studio
+.vs/
+bin/
+obj/
+
+# Rider
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# User files
+*.user
+*.suo
+
+# Build artifacts
+*.dll
+*.pdb

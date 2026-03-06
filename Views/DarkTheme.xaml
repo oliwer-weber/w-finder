@@ -1,0 +1,31 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Surface colors -->
+    <SolidColorBrush x:Key="PaneBackground"       Color="#333940"/>
+    <SolidColorBrush x:Key="ListBackground"        Color="#3B4453"/>
+    <SolidColorBrush x:Key="SearchBoxBackground"   Color="#2C3440"/>
+    <SolidColorBrush x:Key="SearchBoxBorder"       Color="#4A5568"/>
+    <SolidColorBrush x:Key="SearchBoxBorderFocus"  Color="#6E8BB5"/>
+    <SolidColorBrush x:Key="SeparatorBrush"        Color="#4A5568"/>
+
+    <!-- Text colors -->
+    <SolidColorBrush x:Key="PrimaryText"           Color="#D4D8DE"/>
+    <SolidColorBrush x:Key="SecondaryText"         Color="#8C939D"/>
+    <SolidColorBrush x:Key="InactiveText"          Color="#677380"/>
+    <SolidColorBrush x:Key="SearchBoxPlaceholder"  Color="#677380"/>
+
+    <!-- Interactive states -->
+    <SolidColorBrush x:Key="ItemHoverBackground"   Color="#444D5A"/>
+    <SolidColorBrush x:Key="ItemSelectedBackground" Color="#4A5F7A"/>
+    <SolidColorBrush x:Key="ItemSelectedText"      Color="#E0E4EA"/>
+
+    <!-- Star icon -->
+    <SolidColorBrush x:Key="StarActive"            Color="#B8A04A"/>
+    <SolidColorBrush x:Key="StarInactive"          Color="#5A6270"/>
+
+    <!-- Expander -->
+    <SolidColorBrush x:Key="ExpanderHeaderText"    Color="#8C939D"/>
+    <SolidColorBrush x:Key="FavoritesBackground"   Color="#353C46"/>
+
+</ResourceDictionary>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>w_finder</Name>
+    <Assembly>C:\Users\oliwer.weber\Documents\Coding\CustomRevitPlugins\w_finder\bin\Debug\net8.0-windows\w_finder.dll</Assembly>
+    <AddInId>e4a7b3c1-5d2f-4e8a-9c6b-1f3d7a2e5b40</AddInId>
+    <FullClassName>w_finder.App</FullClassName>
+    <VendorId>OliwerWeber</VendorId>
+    <VendorDescription>Oliwer Weber</VendorDescription>
+  </AddIn>
+</RevitAddIns>
