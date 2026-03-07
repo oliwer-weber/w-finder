@@ -6,7 +6,7 @@ using w_finder.Services;
 namespace w_finder;
 
 /// <summary>
-/// Toggles the w_finder dockable pane visibility when the ribbon button is clicked.
+/// Toggles the Rauncher dockable pane visibility when the ribbon button is clicked.
 /// Also refreshes the browser item cache each time the pane is shown.
 /// </summary>
 [Transaction(TransactionMode.Manual)]

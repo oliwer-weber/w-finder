@@ -1,4 +1,4 @@
-# CLAUDE.md — w_finder Revit 2025 Plugin
+# CLAUDE.md — Rauncher Revit 2025 Plugin
 
 ## Developer Context
 - **Skill level:** Learning C# — needs guidance on syntax, patterns, and Revit API usage.
@@ -69,10 +69,10 @@ w_finder/
 
 ### Favorites
 - Star toggle on each item, collapsible section above results.
-- Persists per project: sidecar JSON for local models, `%AppData%\w_finder\favorites\` for cloud models.
+- Persists per project: sidecar JSON for local models, `%AppData%\Rauncher\favorites\` for cloud models.
 
 ### Theming
-- Manual light/dark toggle (sun/moon button). Persists at `%AppData%\w_finder\theme.txt`.
+- Manual light/dark toggle (sun/moon button). Persists at `%AppData%\Rauncher\theme.txt`.
 
 ## Technical Patterns
 - **Thread safety:** All Revit API calls go through `RevitBackgroundTask.Raise(Action<UIApplication>)` — singleton ExternalEvent that queues one action at a time.

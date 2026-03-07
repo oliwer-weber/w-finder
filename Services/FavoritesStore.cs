@@ -17,7 +17,7 @@ public static class FavoritesStore
     // AppData folder for cloud model favorites
     private static readonly string AppDataFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "w_finder", "favorites");
+        "Rauncher", "favorites");
 
     private static string GetFilePath(Document doc)
     {

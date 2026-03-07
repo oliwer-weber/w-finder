@@ -12,7 +12,7 @@ public static class ThemeService
 
     private static readonly string SettingsFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "w_finder", "theme.txt");
+        "Rauncher", "theme.txt");
 
     static ThemeService()
     {

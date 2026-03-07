@@ -43,7 +43,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         }
     }
 
-    private string _statusText = "Open a project and click the w_finder button.";
+    private string _statusText = "Open a project and click the Rauncher button.";
     public string StatusText
     {
         get => _statusText;

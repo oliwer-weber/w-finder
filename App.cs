@@ -26,7 +26,7 @@ public class App : IExternalApplication
 
         // Register the dockable pane (must happen during OnStartup)
         var paneProvider = new FinderDockablePane();
-        application.RegisterDockablePane(PaneId, "w_finder", paneProvider);
+        application.RegisterDockablePane(PaneId, "Rauncher", paneProvider);
 
         // Create a ribbon tab and button to toggle the pane
         CreateRibbonButton(application);
@@ -41,7 +41,7 @@ public class App : IExternalApplication
 
     private void CreateRibbonButton(UIControlledApplication application)
     {
-        string tabName = "w_finder";
+        string tabName = "Rauncher";
         application.CreateRibbonTab(tabName);
 
         var panel = application.CreateRibbonPanel(tabName, "Tools");
@@ -49,7 +49,7 @@ public class App : IExternalApplication
         string assemblyPath = Assembly.GetExecutingAssembly().Location;
         var buttonData = new PushButtonData(
             name: "ToggleFinder",
-            text: "w_finder",
+            text: "Rauncher",
             assemblyName: assemblyPath,
             className: "w_finder.FinderCommand");
 
@@ -58,7 +58,7 @@ public class App : IExternalApplication
         {
             button.LargeImage = CreateMagnifyingGlassIcon(32);
             button.Image = CreateMagnifyingGlassIcon(16);
-            button.ToolTip = "Toggle the w_finder search pane";
+            button.ToolTip = "Toggle the Rauncher search pane";
         }
     }
 
