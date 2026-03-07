@@ -38,7 +38,8 @@ public static class BrowserItemCollector
             {
                 Name = view.Name,
                 Category = GetViewCategory(view),
-                ElementId = view.Id.Value
+                ElementId = view.Id.Value,
+                Kind = BrowserItemKind.View
             });
         }
     }
@@ -75,7 +76,8 @@ public static class BrowserItemCollector
             {
                 Name = $"{sheet.SheetNumber} - {sheet.Name}",
                 Category = "Sheet",
-                ElementId = sheet.Id.Value
+                ElementId = sheet.Id.Value,
+                Kind = BrowserItemKind.Sheet
             });
         }
     }
@@ -94,7 +96,8 @@ public static class BrowserItemCollector
             {
                 Name = schedule.Name,
                 Category = category,
-                ElementId = schedule.Id.Value
+                ElementId = schedule.Id.Value,
+                Kind = BrowserItemKind.Schedule
             });
         }
     }
@@ -113,7 +116,8 @@ public static class BrowserItemCollector
             {
                 Name = family.Name,
                 Category = family.FamilyCategory?.Name ?? "Family",
-                ElementId = family.Id.Value
+                ElementId = family.Id.Value,
+                Kind = BrowserItemKind.Family
             });
 
             // Add each type within the family
@@ -125,7 +129,8 @@ public static class BrowserItemCollector
                     {
                         Name = $"{family.Name}: {symbol.Name}",
                         Category = family.FamilyCategory?.Name ?? "Family Type",
-                        ElementId = symbol.Id.Value
+                        ElementId = symbol.Id.Value,
+                        Kind = BrowserItemKind.FamilyType
                     });
                 }
             }
@@ -146,7 +151,8 @@ public static class BrowserItemCollector
             {
                 Name = group.Name,
                 Category = "Model Group",
-                ElementId = group.Id.Value
+                ElementId = group.Id.Value,
+                Kind = BrowserItemKind.Group
             });
         }
 
@@ -162,7 +168,8 @@ public static class BrowserItemCollector
             {
                 Name = group.Name,
                 Category = "Detail Group",
-                ElementId = group.Id.Value
+                ElementId = group.Id.Value,
+                Kind = BrowserItemKind.Group
             });
         }
     }
@@ -179,7 +186,8 @@ public static class BrowserItemCollector
             {
                 Name = link.Name,
                 Category = "Revit Link",
-                ElementId = link.Id.Value
+                ElementId = link.Id.Value,
+                Kind = BrowserItemKind.RevitLink
             });
         }
     }
@@ -196,7 +204,8 @@ public static class BrowserItemCollector
             {
                 Name = assembly.Name,
                 Category = "Assembly",
-                ElementId = assembly.Id.Value
+                ElementId = assembly.Id.Value,
+                Kind = BrowserItemKind.Assembly
             });
         }
     }

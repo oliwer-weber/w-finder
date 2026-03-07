@@ -28,4 +28,8 @@
     <SolidColorBrush x:Key="ExpanderHeaderText"    Color="#8C939D"/>
     <SolidColorBrush x:Key="FavoritesBackground"   Color="#353C46"/>
 
+    <!-- Scrollbar -->
+    <SolidColorBrush x:Key="ScrollThumb"           Color="#5A6270"/>
+    <SolidColorBrush x:Key="ScrollThumbHover"      Color="#6E7A8A"/>
+
 </ResourceDictionary>

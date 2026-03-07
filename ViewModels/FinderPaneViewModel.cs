@@ -13,6 +13,7 @@ namespace w_finder.ViewModels;
 public class FinderPaneViewModel : INotifyPropertyChanged
 {
     private List<BrowserItem> _allItems = new();
+    private List<BrowserItem> _commandItems = new();
     private HashSet<long> _favoriteIds = new();
     private readonly DispatcherTimer _debounceTimer;
 
@@ -61,12 +62,76 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         }
     }
 
+    private BrowserItem? _highlightedItem;
+    public BrowserItem? HighlightedItem
+    {
+        get => _highlightedItem;
+        set { _highlightedItem = value; OnPropertyChanged(); }
+    }
+
     private bool _hasFavorites;
     public bool HasFavorites
     {
         get => _hasFavorites;
-        set { _hasFavorites = value; OnPropertyChanged(); }
+        set { _hasFavorites = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowFavorites)); }
     }
+
+    public bool IsFamilyMode => _searchText.StartsWith(">");
+    public bool IsCommandMode => _searchText.StartsWith(":");
+    public bool IsEditFamilyMode => IsFamilyMode && ParseFamilyInput().editMode;
+    public bool IsPlaceFamilyMode => IsFamilyMode && !IsEditFamilyMode;
+    public bool IsBrowserMode => !IsFamilyMode && !IsCommandMode;
+    public bool ShowFavorites => HasFavorites && !IsFamilyMode && !IsCommandMode;
+
+    /// <summary>
+    /// Parses the Family Mode input, extracting optional -c category filter,
+    /// -e edit flag, and the remaining fuzzy search query.
+    /// </summary>
+    private (string query, string? categoryFilter, bool editMode) ParseFamilyInput()
+    {
+        var raw = _searchText.Substring(1).TrimStart();
+        string? categoryFilter = null;
+        bool editMode = false;
+
+        // Check for -e flag (standalone, no argument)
+        int eIndex = raw.IndexOf("-e", StringComparison.OrdinalIgnoreCase);
+        if (eIndex >= 0)
+        {
+            // Make sure it's a standalone flag (at end, or followed by space)
+            int afterE = eIndex + 2;
+            if (afterE >= raw.Length || raw[afterE] == ' ')
+            {
+                editMode = true;
+                raw = (raw.Substring(0, eIndex) + (afterE < raw.Length ? raw.Substring(afterE) : "")).Trim();
+            }
+        }
+
+        // Look for -c flag followed by a filter word
+        int flagIndex = raw.IndexOf("-c ", StringComparison.OrdinalIgnoreCase);
+        if (flagIndex >= 0)
+        {
+            var afterFlag = raw.Substring(flagIndex + 3).TrimStart();
+            int spaceIndex = afterFlag.IndexOf(' ');
+            if (spaceIndex < 0)
+            {
+                categoryFilter = afterFlag;
+                raw = raw.Substring(0, flagIndex).TrimEnd();
+            }
+            else
+            {
+                categoryFilter = afterFlag.Substring(0, spaceIndex);
+                raw = (raw.Substring(0, flagIndex) + afterFlag.Substring(spaceIndex)).Trim();
+            }
+        }
+
+        return (raw, categoryFilter, editMode);
+    }
+
+    private string EffectiveSearchText => IsFamilyMode
+        ? ParseFamilyInput().query
+        : IsCommandMode
+            ? _searchText.Substring(1).TrimStart()
+            : _searchText;
 
     public ObservableCollection<BrowserItem> Results { get; } = new();
     public ObservableCollection<BrowserItem> Favorites { get; } = new();
@@ -79,11 +144,68 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// </summary>
     public event Action? FavoritesChanged;
 
+    /// <summary>
+    /// Fired after the pane is shown, so the view can focus the search box.
+    /// </summary>
+    public event Action? FocusSearchRequested;
+
+    public void RequestFocusSearch()
+    {
+        SearchText = string.Empty;
+        HighlightedItem = null;
+        FocusSearchRequested?.Invoke();
+    }
+
     public void RequestOpen(BrowserItem item) => ItemOpenRequested?.Invoke(item);
+
+    /// <summary>
+    /// Builds a unified list of favorites + results for keyboard navigation.
+    /// </summary>
+    private List<BrowserItem> GetUnifiedList()
+    {
+        var list = new List<BrowserItem>(Favorites.Count + Results.Count);
+        foreach (var fav in Favorites) list.Add(fav);
+        foreach (var res in Results)
+        {
+            if (!res.IsFavorite) list.Add(res);
+        }
+        return list;
+    }
+
+    public void MoveHighlight(int direction)
+    {
+        var unified = GetUnifiedList();
+        if (unified.Count == 0) return;
+
+        if (HighlightedItem == null)
+        {
+            HighlightedItem = direction > 0 ? unified[0] : unified[^1];
+            return;
+        }
+
+        int index = unified.IndexOf(HighlightedItem);
+        int newIndex = Math.Clamp(index + direction, 0, unified.Count - 1);
+        HighlightedItem = unified[newIndex];
+    }
+
+    /// <summary>
+    /// Opens the currently highlighted item. Returns true if an item was opened.
+    /// </summary>
+    public bool OpenHighlighted()
+    {
+        if (HighlightedItem == null) return false;
+        ItemOpenRequested?.Invoke(HighlightedItem);
+        return true;
+    }
 
     /// <summary>
     /// Loads items and applies saved favorite state.
     /// </summary>
+    public void LoadCommands(List<BrowserItem> commands)
+    {
+        _commandItems = commands;
+    }
+
     public void LoadItems(List<BrowserItem> items, HashSet<long> favoriteIds)
     {
         _allItems = items;
@@ -117,15 +239,74 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     {
         Results.Clear();
 
-        var filtered = FuzzyMatcher.Match(_allItems, SearchText);
+        if (IsCommandMode)
+        {
+            var query = _searchText.Substring(1).TrimStart();
+            var filtered = FuzzyMatcher.Match(_commandItems, query);
 
-        foreach (var item in filtered)
-            Results.Add(item);
+            foreach (var item in filtered)
+                Results.Add(item);
 
-        if (!string.IsNullOrWhiteSpace(SearchText))
-            StatusText = $"{filtered.Count} of {_allItems.Count} items.";
+            StatusText = string.IsNullOrWhiteSpace(query)
+                ? $"Command Mode \u2014 {_commandItems.Count} commands"
+                : $"Command Mode \u2014 {filtered.Count} of {_commandItems.Count} commands";
+            HighlightedItem = Results.Count > 0 ? Results[0] : null;
+        }
+        else if (IsFamilyMode)
+        {
+            var (query, categoryFilter, editMode) = ParseFamilyInput();
+
+            var source = _allItems.Where(i => i.Kind == BrowserItemKind.FamilyType);
+
+            // Apply -c category filter (substring match, case-insensitive)
+            if (!string.IsNullOrEmpty(categoryFilter))
+                source = source.Where(i =>
+                    i.Category.Contains(categoryFilter, StringComparison.OrdinalIgnoreCase));
+
+            var sourceList = source.ToList();
+            var filtered = FuzzyMatcher.Match(sourceList, query);
+
+            // Sort by category for grouped display
+            var sorted = filtered.OrderBy(i => i.Category, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var item in sorted)
+                Results.Add(item);
+
+            var statusParts = new List<string> { editMode ? "Edit Family Mode" : "Family Mode" };
+            if (!string.IsNullOrEmpty(categoryFilter))
+                statusParts.Add($"-c {categoryFilter}");
+            string prefix = string.Join(" ", statusParts);
+
+            StatusText = string.IsNullOrWhiteSpace(query)
+                ? $"{prefix} \u2014 {Results.Count} types"
+                : $"{prefix} \u2014 {Results.Count} of {sourceList.Count} types";
+            HighlightedItem = Results.Count > 0 ? Results[0] : null;
+        }
         else
-            StatusText = $"{_allItems.Count} items loaded.";
+        {
+            var filtered = FuzzyMatcher.Match(_allItems, _searchText);
+
+            foreach (var item in filtered)
+                Results.Add(item);
+
+            if (!string.IsNullOrWhiteSpace(_searchText))
+            {
+                StatusText = $"{filtered.Count} of {_allItems.Count} items.";
+                HighlightedItem = Results.Count > 0 ? Results[0] : null;
+            }
+            else
+            {
+                StatusText = $"{_allItems.Count} items loaded.";
+                HighlightedItem = null;
+            }
+        }
+
+        OnPropertyChanged(nameof(IsFamilyMode));
+        OnPropertyChanged(nameof(IsEditFamilyMode));
+        OnPropertyChanged(nameof(IsPlaceFamilyMode));
+        OnPropertyChanged(nameof(IsCommandMode));
+        OnPropertyChanged(nameof(IsBrowserMode));
+        OnPropertyChanged(nameof(ShowFavorites));
     }
 
     private void RefreshFavorites()

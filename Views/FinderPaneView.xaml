@@ -158,6 +158,115 @@
             </Setter>
         </Style>
 
+        <!-- Minimal Expander with thin chevron arrow -->
+        <Style x:Key="MinimalExpander" TargetType="Expander">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <DockPanel>
+                            <ToggleButton DockPanel.Dock="Top"
+                                          IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          Cursor="Hand">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent" Padding="0,2">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Path x:Name="Arrow"
+                                                      Data="M 0,0 L 4,3.5 L 0,7"
+                                                      Stroke="{DynamicResource ExpanderHeaderText}"
+                                                      StrokeThickness="1.2"
+                                                      StrokeLineJoin="Round"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      Fill="Transparent"
+                                                      VerticalAlignment="Center"
+                                                      Margin="0,0,6,0"
+                                                      RenderTransformOrigin="0.5,0.5">
+                                                    <Path.RenderTransform>
+                                                        <RotateTransform Angle="0"/>
+                                                    </Path.RenderTransform>
+                                                </Path>
+                                                <ContentPresenter ContentSource="Content"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Arrow" Property="RenderTransform">
+                                                    <Setter.Value>
+                                                        <RotateTransform Angle="90"/>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                                <ContentPresenter ContentSource="Header"/>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="ExpandSite"
+                                              Visibility="Collapsed"
+                                              DockPanel.Dock="Bottom"/>
+                        </DockPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="True">
+                                <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Minimal pill scrollbar: thin thumb, no arrows, no track chrome -->
+        <Style x:Key="PillScrollThumb" TargetType="Thumb">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border x:Name="ThumbBorder"
+                                Background="{DynamicResource ScrollThumb}"
+                                CornerRadius="3"
+                                Opacity="0.6"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background"
+                                        Value="{DynamicResource ScrollThumbHover}"/>
+                                <Setter TargetName="ThumbBorder" Property="Opacity" Value="1"/>
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background"
+                                        Value="{DynamicResource ScrollThumbHover}"/>
+                                <Setter TargetName="ThumbBorder" Property="Opacity" Value="1"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ScrollBar">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="MinWidth" Value="6"/>
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Track x:Name="PART_Track"
+                               IsDirectionReversed="True">
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource PillScrollThumb}"/>
+                            </Track.Thumb>
+                        </Track>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
     </UserControl.Resources>
 
     <Grid Margin="8">
@@ -178,23 +287,64 @@
                     Click="ThemeToggle_Click"/>
             <TextBox x:Name="SearchBox"
                      Style="{StaticResource SearchBoxStyle}"
-                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
+                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                     PreviewKeyDown="SearchBox_PreviewKeyDown"/>
         </DockPanel>
 
         <!-- Status bar -->
-        <TextBlock Grid.Row="1"
-                   Margin="4,6,4,2"
-                   FontSize="11"
-                   Foreground="{DynamicResource InactiveText}"
-                   Text="{Binding StatusText}"/>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="4,6,4,2">
+            <Border Background="#3C6EB4"
+                    CornerRadius="3"
+                    Padding="6,1"
+                    Margin="0,0,6,0"
+                    Visibility="{Binding IsBrowserMode, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="BROWSER"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Foreground="White"/>
+            </Border>
+            <Border Background="{DynamicResource SearchBoxBorderFocus}"
+                    CornerRadius="3"
+                    Padding="6,1"
+                    Margin="0,0,6,0"
+                    Visibility="{Binding IsPlaceFamilyMode, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="PLACE"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Foreground="White"/>
+            </Border>
+            <Border Background="#8B5CF6"
+                    CornerRadius="3"
+                    Padding="6,1"
+                    Margin="0,0,6,0"
+                    Visibility="{Binding IsEditFamilyMode, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="EDIT"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Foreground="White"/>
+            </Border>
+            <Border Background="#D08030"
+                    CornerRadius="3"
+                    Padding="6,1"
+                    Margin="0,0,6,0"
+                    Visibility="{Binding IsCommandMode, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="CMD"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Foreground="White"/>
+            </Border>
+            <TextBlock FontSize="11"
+                       Foreground="{DynamicResource InactiveText}"
+                       Text="{Binding StatusText}"/>
+        </StackPanel>
 
         <!-- Favorites section -->
         <Border Grid.Row="2"
                 Margin="0,4"
                 Background="{DynamicResource FavoritesBackground}"
                 CornerRadius="3"
-                Visibility="{Binding HasFavorites, Converter={StaticResource BoolToVisibility}}">
-            <Expander IsExpanded="True" Margin="4">
+                Visibility="{Binding ShowFavorites, Converter={StaticResource BoolToVisibility}}">
+            <Expander IsExpanded="True" Margin="4" Style="{StaticResource MinimalExpander}">
                 <Expander.Header>
                     <TextBlock Text="FAVORITES"
                                FontSize="10"
@@ -206,8 +356,10 @@
                          Background="{DynamicResource FavoritesBackground}"
                          ItemContainerStyle="{StaticResource ThemedListBoxItem}"
                          ItemsSource="{Binding Favorites}"
-                         SelectedItem="{Binding SelectedItem}"
+                         SelectedItem="{Binding HighlightedItem, Mode=OneWay}"
+                         IsSynchronizedWithCurrentItem="False"
                          MaxHeight="200"
+                         SelectionChanged="List_SelectionChanged"
                          MouseDoubleClick="ResultsList_MouseDoubleClick">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
@@ -240,8 +392,23 @@
                  Style="{StaticResource ThemedListBox}"
                  ItemContainerStyle="{StaticResource ThemedListBoxItem}"
                  ItemsSource="{Binding Results}"
-                 SelectedItem="{Binding SelectedItem}"
+                 SelectedItem="{Binding HighlightedItem, Mode=OneWay}"
+                 IsSynchronizedWithCurrentItem="False"
+                 SelectionChanged="List_SelectionChanged"
                  MouseDoubleClick="ResultsList_MouseDoubleClick">
+            <ListBox.GroupStyle>
+                <GroupStyle>
+                    <GroupStyle.HeaderTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Name}"
+                                       FontSize="10"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource ExpanderHeaderText}"
+                                       Margin="4,8,4,2"/>
+                        </DataTemplate>
+                    </GroupStyle.HeaderTemplate>
+                </GroupStyle>
+            </ListBox.GroupStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <DockPanel>

@@ -32,7 +32,11 @@ public class FinderCommand : IExternalCommand
                 App.ViewModel.LoadItems(items, favoriteIds);
             }
 
+            // Load command items (static, not per-document)
+            App.ViewModel.LoadCommands(CommandCollector.Collect());
+
             pane.Show();
+            App.ViewModel.RequestFocusSearch();
         }
 
         return Result.Succeeded;
