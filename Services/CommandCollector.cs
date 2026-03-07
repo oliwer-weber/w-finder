@@ -10,12 +10,17 @@ namespace w_finder.Services;
 /// </summary>
 public static class CommandCollector
 {
+    // Cached — PostableCommand values are static per Revit session, never rebuild.
+    private static List<BrowserItem>? _cached;
+
     /// <summary>
     /// Returns all PostableCommand values as BrowserItems with human-readable names.
-    /// Called once when the pane opens; the list is static across the session.
+    /// Result is cached after the first call; safe to call every pane open.
     /// </summary>
     public static List<BrowserItem> Collect()
     {
+        if (_cached != null) return _cached;
+
         var items = new List<BrowserItem>();
 
         foreach (PostableCommand cmd in Enum.GetValues(typeof(PostableCommand)))
@@ -34,7 +39,8 @@ public static class CommandCollector
             });
         }
 
-        return items;
+        _cached = items;
+        return _cached;
     }
 
     /// <summary>

@@ -235,6 +235,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     public HashSet<long> GetFavoriteIds() => _favoriteIds;
 
+    // Maximum items rendered at once — keeps the list fast regardless of project size.
+    private const int MaxResults = 200;
+
     public void RefreshResults()
     {
         Results.Clear();
@@ -243,13 +246,14 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         {
             var query = _searchText.Substring(1).TrimStart();
             var filtered = FuzzyMatcher.Match(_commandItems, query);
+            int totalMatched = filtered.Count;
 
-            foreach (var item in filtered)
+            foreach (var item in filtered.Take(MaxResults))
                 Results.Add(item);
 
             StatusText = string.IsNullOrWhiteSpace(query)
                 ? $"Command Mode \u2014 {_commandItems.Count} commands"
-                : $"Command Mode \u2014 {filtered.Count} of {_commandItems.Count} commands";
+                : $"Command Mode \u2014 {Math.Min(totalMatched, MaxResults)} of {_commandItems.Count} commands";
             HighlightedItem = Results.Count > 0 ? Results[0] : null;
         }
         else if (IsFamilyMode)
@@ -265,9 +269,12 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
             var sourceList = source.ToList();
             var filtered = FuzzyMatcher.Match(sourceList, query);
+            int totalMatched = filtered.Count;
 
-            // Sort by category for grouped display
-            var sorted = filtered.OrderBy(i => i.Category, StringComparer.OrdinalIgnoreCase);
+            // Sort by category for grouped display, then cap
+            var sorted = filtered
+                .OrderBy(i => i.Category, StringComparer.OrdinalIgnoreCase)
+                .Take(MaxResults);
 
             foreach (var item in sorted)
                 Results.Add(item);
@@ -278,20 +285,21 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             string prefix = string.Join(" ", statusParts);
 
             StatusText = string.IsNullOrWhiteSpace(query)
-                ? $"{prefix} \u2014 {Results.Count} types"
-                : $"{prefix} \u2014 {Results.Count} of {sourceList.Count} types";
+                ? $"{prefix} \u2014 {totalMatched} types"
+                : $"{prefix} \u2014 {Math.Min(totalMatched, MaxResults)} of {sourceList.Count} types";
             HighlightedItem = Results.Count > 0 ? Results[0] : null;
         }
         else
         {
             var filtered = FuzzyMatcher.Match(_allItems, _searchText);
+            int totalMatched = filtered.Count;
 
-            foreach (var item in filtered)
+            foreach (var item in filtered.Take(MaxResults))
                 Results.Add(item);
 
             if (!string.IsNullOrWhiteSpace(_searchText))
             {
-                StatusText = $"{filtered.Count} of {_allItems.Count} items.";
+                StatusText = $"{Math.Min(totalMatched, MaxResults)} of {_allItems.Count} items.";
                 HighlightedItem = Results.Count > 0 ? Results[0] : null;
             }
             else

@@ -21,8 +21,24 @@ public enum BrowserItemKind
 /// </summary>
 public class BrowserItem : INotifyPropertyChanged
 {
-    public required string Name { get; init; }
-    public required string Category { get; init; }
+    private string _name = string.Empty;
+    public required string Name
+    {
+        get => _name;
+        init { _name = value; NameLower = value.ToLowerInvariant(); }
+    }
+
+    private string _category = string.Empty;
+    public required string Category
+    {
+        get => _category;
+        init { _category = value; CategoryLower = value.ToLowerInvariant(); }
+    }
+
+    /// <summary>Pre-computed lowercase for zero-allocation fuzzy matching.</summary>
+    public string NameLower { get; private set; } = string.Empty;
+    public string CategoryLower { get; private set; } = string.Empty;
+
     public long ElementId { get; init; }
     public BrowserItemKind Kind { get; init; }
 

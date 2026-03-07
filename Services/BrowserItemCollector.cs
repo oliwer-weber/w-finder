@@ -104,14 +104,13 @@ public static class BrowserItemCollector
 
     private static void CollectFamilies(Document doc, List<BrowserItem> items)
     {
-        // Collect loaded families and their types
+        // Collect the Family nodes themselves (shown in browser root)
         var families = new FilteredElementCollector(doc)
             .OfClass(typeof(Family))
             .Cast<Family>();
 
         foreach (var family in families)
         {
-            // Add the family itself
             items.Add(new BrowserItem
             {
                 Name = family.Name,
@@ -119,21 +118,22 @@ public static class BrowserItemCollector
                 ElementId = family.Id.Value,
                 Kind = BrowserItemKind.Family
             });
+        }
 
-            // Add each type within the family
-            foreach (var typeId in family.GetFamilySymbolIds())
+        // Collect all FamilySymbols in one batch — avoids N+1 doc.GetElement() calls.
+        var symbols = new FilteredElementCollector(doc)
+            .OfClass(typeof(FamilySymbol))
+            .Cast<FamilySymbol>();
+
+        foreach (var symbol in symbols)
+        {
+            items.Add(new BrowserItem
             {
-                if (doc.GetElement(typeId) is FamilySymbol symbol)
-                {
-                    items.Add(new BrowserItem
-                    {
-                        Name = $"{family.Name}: {symbol.Name}",
-                        Category = family.FamilyCategory?.Name ?? "Family Type",
-                        ElementId = symbol.Id.Value,
-                        Kind = BrowserItemKind.FamilyType
-                    });
-                }
-            }
+                Name = $"{symbol.Family.Name}: {symbol.Name}",
+                Category = symbol.Family.FamilyCategory?.Name ?? "Family Type",
+                ElementId = symbol.Id.Value,
+                Kind = BrowserItemKind.FamilyType
+            });
         }
     }
 

@@ -17,12 +17,16 @@ public static class FuzzyMatcher
         if (string.IsNullOrWhiteSpace(query))
             return items;
 
+        // Compute queryLower once — not per item.
+        string queryLower = query.ToLowerInvariant();
+
         var scored = new List<(BrowserItem Item, int Score)>();
 
         foreach (var item in items)
         {
-            int nameScore = ScoreMatch(item.Name, query);
-            int categoryScore = ScoreMatch(item.Category, query);
+            // Use pre-lowercased fields to avoid per-item allocations.
+            int nameScore = ScoreMatch(item.Name, item.NameLower, queryLower);
+            int categoryScore = ScoreMatch(item.Category, item.CategoryLower, queryLower);
 
             // Name matches are weighted higher than category matches
             int best = Math.Max(nameScore, categoryScore / 2);
@@ -39,29 +43,16 @@ public static class FuzzyMatcher
 
     /// <summary>
     /// Scores how well the query matches the target string.
+    /// Single-pass: subsequence check and scoring are merged together.
     /// Returns 0 if the query is not a subsequence of the target.
     /// </summary>
-    private static int ScoreMatch(string target, string query)
+    private static int ScoreMatch(string target, string targetLower, string queryLower)
     {
-        if (target.Length == 0 || query.Length == 0)
+        if (targetLower.Length == 0 || queryLower.Length == 0)
             return 0;
 
-        string targetLower = target.ToLowerInvariant();
-        string queryLower = query.ToLowerInvariant();
-
-        // Quick check: is query a subsequence of target?
-        int qi = 0;
-        for (int ti = 0; ti < targetLower.Length && qi < queryLower.Length; ti++)
-        {
-            if (targetLower[ti] == queryLower[qi])
-                qi++;
-        }
-        if (qi < queryLower.Length)
-            return 0; // not a subsequence
-
-        // Score the match
         int score = 0;
-        qi = 0;
+        int qi = 0;
         bool prevMatched = false;
 
         for (int ti = 0; ti < targetLower.Length && qi < queryLower.Length; ti++)
@@ -78,7 +69,8 @@ public static class FuzzyMatcher
                 if (ti == 0)
                     score += 5;
 
-                // Word boundary bonus (char after space, dash, underscore, or case change)
+                // Word boundary bonus (char after space, dash, underscore, case change)
+                // Uses the original target so PascalCase boundaries are detected correctly.
                 if (ti > 0 && IsWordBoundary(target, ti))
                     score += 3;
 
@@ -90,6 +82,10 @@ public static class FuzzyMatcher
                 prevMatched = false;
             }
         }
+
+        // If we didn't consume the full query it's not a subsequence — no match.
+        if (qi < queryLower.Length)
+            return 0;
 
         // Exact prefix bonus
         if (targetLower.StartsWith(queryLower))
