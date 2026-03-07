@@ -16,6 +16,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     private List<BrowserItem> _commandItems = new();
     private HashSet<long> _favoriteIds = new();
     private readonly DispatcherTimer _debounceTimer;
+    private (string query, string? categoryFilter, bool editMode)? _cachedFamilyInput;
+    private List<BrowserItem>? _cachedUnifiedList;
 
     public FinderPaneViewModel()
     {
@@ -37,6 +39,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         set
         {
             _searchText = value;
+            _cachedFamilyInput = null;
             OnPropertyChanged();
             _debounceTimer.Stop();
             _debounceTimer.Start();
@@ -89,6 +92,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// </summary>
     private (string query, string? categoryFilter, bool editMode) ParseFamilyInput()
     {
+        if (_cachedFamilyInput.HasValue) return _cachedFamilyInput.Value;
+
         var raw = _searchText.Substring(1).TrimStart();
         string? categoryFilter = null;
         bool editMode = false;
@@ -124,7 +129,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             }
         }
 
-        return (raw, categoryFilter, editMode);
+        _cachedFamilyInput = (raw, categoryFilter, editMode);
+        return _cachedFamilyInput.Value;
     }
 
     private string EffectiveSearchText => IsFamilyMode
@@ -163,12 +169,15 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// </summary>
     private List<BrowserItem> GetUnifiedList()
     {
+        if (_cachedUnifiedList != null) return _cachedUnifiedList;
+
         var list = new List<BrowserItem>(Favorites.Count + Results.Count);
         foreach (var fav in Favorites) list.Add(fav);
         foreach (var res in Results)
         {
             if (!res.IsFavorite) list.Add(res);
         }
+        _cachedUnifiedList = list;
         return list;
     }
 
@@ -240,6 +249,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     public void RefreshResults()
     {
+        _cachedUnifiedList = null;
         Results.Clear();
 
         if (IsCommandMode)
@@ -319,6 +329,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     private void RefreshFavorites()
     {
+        _cachedUnifiedList = null;
         Favorites.Clear();
         foreach (var item in _allItems.Where(i => i.IsFavorite))
             Favorites.Add(item);
