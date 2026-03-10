@@ -1,4 +1,5 @@
 using Autodesk.Revit.UI;
+using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Media;
@@ -13,8 +14,33 @@ namespace w_finder;
 /// </summary>
 public class App : IExternalApplication
 {
-    // This GUID must match what we use when toggling the pane in FinderCommand.
-    public static readonly DockablePaneId PaneId = new(new Guid("a1b2c3d4-e5f6-7890-abcd-ef1234567890"));
+    private static readonly Guid DefaultPaneGuid = new("b2c3d4e5-f6a7-8901-bcde-f12345678901");
+
+    // Reads GUID from file if a reset was requested, otherwise uses the default.
+    // Revit caches pane positions by GUID, so a new GUID = fresh floating position.
+    public static readonly DockablePaneId PaneId = new(LoadPaneGuid());
+
+    /// <summary>
+    /// File where we persist the pane GUID. ResetPaneCommand writes a new GUID here.
+    /// </summary>
+    public static string PaneGuidFilePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "Rauncher", "pane_guid.txt");
+
+    private static Guid LoadPaneGuid()
+    {
+        try
+        {
+            if (File.Exists(PaneGuidFilePath))
+            {
+                string text = File.ReadAllText(PaneGuidFilePath).Trim();
+                if (Guid.TryParse(text, out var guid))
+                    return guid;
+            }
+        }
+        catch { /* fall through to default */ }
+        return DefaultPaneGuid;
+    }
 
     // Shared ViewModel — the dockable pane's WPF view binds to this.
     public static FinderPaneViewModel ViewModel { get; } = new();
@@ -59,6 +85,18 @@ public class App : IExternalApplication
             button.LargeImage = CreateMagnifyingGlassIcon(32);
             button.Image = CreateMagnifyingGlassIcon(16);
             button.ToolTip = "Toggle the Rauncher search pane";
+        }
+
+        var resetData = new PushButtonData(
+            name: "ResetPane",
+            text: "Reset\nPane",
+            assemblyName: assemblyPath,
+            className: "w_finder.ResetPaneCommand");
+
+        var resetButton = panel.AddItem(resetData) as PushButton;
+        if (resetButton != null)
+        {
+            resetButton.ToolTip = "Force-reset the Rauncher pane if it's invisible";
         }
     }
 

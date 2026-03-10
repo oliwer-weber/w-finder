@@ -14,7 +14,9 @@ public class FinderDockablePane : IDockablePaneProvider
         data.FrameworkElement = new FinderPaneView();
         data.InitialState = new DockablePaneState
         {
-            DockPosition = DockPosition.Right
+            DockPosition = DockPosition.Floating
         };
+        // Place the floating pane at a visible on-screen position (left, top, right, bottom)
+        data.InitialState.SetFloatingRectangle(new Autodesk.Revit.DB.Rectangle(100, 100, 500, 700));
     }
 }
