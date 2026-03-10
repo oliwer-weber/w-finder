@@ -32,8 +32,9 @@ public class FinderCommand : IExternalCommand
                 App.ViewModel.LoadItems(items, favoriteIds);
             }
 
-            // Load command items (static, not per-document)
+            // Load command and shebang items (static, not per-document)
             App.ViewModel.LoadCommands(CommandCollector.Collect());
+            App.ViewModel.LoadShebangs(ShebangService.Collect());
 
             pane.Show();
             App.ViewModel.RequestFocusSearch();

@@ -21,18 +21,23 @@ w_finder/
 ├── App.cs                        # IExternalApplication — ribbon button + dockable pane registration
 ├── FinderCommand.cs              # IExternalCommand — toggles pane visibility, refreshes item cache
 ├── FinderDockablePane.cs         # IDockablePaneProvider — WPF host
+├── ResetPaneCommand.cs           # Emergency reset for lost pane position
 ├── Models/
-│   └── BrowserItem.cs            # Data model + BrowserItemKind enum (View, Sheet, Schedule, Family, FamilyType, Group, RevitLink, Assembly, Command)
+│   ├── BrowserItem.cs            # Data model + BrowserItemKind enum (..., Command, Shebang)
+│   └── QuickAction.cs            # QuickActionKind enum + action model (Rename, Delete, Duplicate, etc.)
 ├── ViewModels/
-│   └── FinderPaneViewModel.cs    # MVVM — search logic, mode detection, favorites, selection
+│   └── FinderPaneViewModel.cs    # MVVM — search logic, mode detection, favorites, selection, action bar
 ├── Views/
-│   ├── FinderPaneView.xaml       # WPF UI (search box, mode badge, grouped results, favorites)
+│   ├── FinderPaneView.xaml       # WPF UI (search box, mode badges, grouped results, favorites, action bar)
 │   ├── FinderPaneView.xaml.cs    # Code-behind — keyboard nav, Revit API actions via ExternalEvent
+│   ├── EqualityConverter.cs      # IMultiValueConverter for action bar highlight
 │   ├── LightTheme.xaml           # Light mode resources
 │   └── DarkTheme.xaml            # Dark mode resources
 ├── Services/
 │   ├── BrowserItemCollector.cs   # Collects all project browser items from the Revit model
 │   ├── CommandCollector.cs       # Builds BrowserItems from Revit's PostableCommand enum for Command Mode
+│   ├── ShebangService.cs         # Registry + executor for shebang commands (! prefix)
+│   ├── QuickActionResolver.cs    # Determines available quick actions per item kind
 │   ├── FuzzyMatcher.cs           # Subsequence matching with scoring (consecutive, boundary, prefix bonuses)
 │   └── FavoritesStore.cs         # Per-project favorites persistence (sidecar JSON / AppData for cloud)
 ├── Helpers/
@@ -42,45 +47,41 @@ w_finder/
 └── w_finder.addin
 ```
 
-## Features
+## Modes
 
-### Search (default mode)
-- Fuzzy search across all project browser items: views, sheets, schedules, families/types, groups, Revit links, assemblies.
-- 150ms debounce, subsequence matching with relevance scoring.
-- **Single click** → selects item in Revit (Properties palette updates). **Double click / Enter** → opens/navigates to views/sheets.
-- Keyboard: Up/Down to navigate, Enter to open, Escape to hide pane, Ctrl+F to toggle favorite.
+All modes are detected by a single-character prefix in the search box. Mode detection lives in `FinderPaneViewModel` as computed properties.
 
-### Family Launcher Mode (`>` prefix)
-- Type `>` to enter Family Mode — filters to only placeable family types (FamilySymbol items).
-- Results grouped by category with visual headings (WPF GroupStyle).
-- **Enter / double-click** → hides pane, activates the FamilySymbol, calls `PromptForFamilyInstancePlacement()` to start Revit placement mode.
-- **`-c` flag** for category filtering: `> -c Doors`, `> -c win`, `> -c gen sofa`. Substring match, case-insensitive. Filter word goes right after `-c`, remaining text is the fuzzy search query.
-- **`-e` flag** for edit mode: `> -e door`, `> -e -c win`. Opens the family document for editing via `doc.EditFamily()` instead of placing. Non-editable families are silently skipped. Status bar shows purple "EDIT" badge.
-- Status bar shows "PLACE" badge (default) or "EDIT" badge (`-e`) and active filter info.
-- Favorites section hidden in Family Mode.
+| Prefix | Mode | Badge color | Filters to |
+|--------|------|-------------|------------|
+| _(none)_ | Browser | Blue | All items (views, sheets, schedules, families, groups, links, assemblies) |
+| `>` | Family | Green/Purple | `BrowserItemKind.FamilyType` only. Flags: `-c <cat>` filter, `-e` edit mode |
+| `:` | Command | Orange | `BrowserItemKind.Command` (all Revit PostableCommands) |
+| `!` | Shebang | Green | `BrowserItemKind.Shebang` (custom plugin commands) |
 
-### Command Mode (`:` prefix)
-- Type `:` to enter Command Mode — searches all Revit PostableCommands.
-- Fuzzy search across all available Revit commands (e.g., `:dynamo`, `:project units`, `:purge`).
-- **Enter / double-click** → hides pane, executes the command via `RevitCommandId.LookupPostableCommandId()` + `uiApp.PostCommand()`.
-- Status bar shows orange "CMD" badge.
-- Favorites section hidden in Command Mode.
-- Command names are auto-generated from the `PostableCommand` enum with PascalCase → "Pascal Case" conversion.
+### Family Mode flags
+- **`-c <word>`** — category substring filter (case-insensitive): `> -c Doors`, `> -c win sofa`
+- **`-e`** — edit mode: opens family for editing instead of placing. Purple "EDIT" badge.
 
-### Favorites
-- Star toggle on each item, collapsible section above results.
-- Persists per project: sidecar JSON for local models, `%AppData%\Rauncher\favorites\` for cloud models.
+### Shebang Mode (`!` prefix)
+- Custom plugin commands registered in `ShebangService.Shebangs` array.
+- Currently one shebang: `!pu` — Toggle Project Units between imperial (feet/fractional inches, 1/16" accuracy) and SI (mm, m², m³).
+- Shebangs use negative ElementIds to avoid collisions with Revit elements.
 
-### Theming
-- Manual light/dark toggle (sun/moon button). Persists at `%AppData%\Rauncher\theme.txt`.
+## Quick Actions
+- **Tab** on a highlighted browser item opens the action bar (pill row at bottom of pane).
+- Available actions depend on item kind (resolved by `QuickActionResolver`):
+  - Views: Rename (F2), Delete (Del), Duplicate (D), Dup+Detail (Shift+D), Dependent (Ctrl+D)
+  - Sheets: Rename, Delete, Duplicate, Dup+Detail
+  - Schedules: Rename, Delete, Duplicate
+  - Families/Groups/Links: Rename, Delete
+  - Commands/Shebangs: no actions
+- Left/Right to navigate pills, Enter to execute, Escape to close action bar.
 
 ## Technical Patterns
 - **Thread safety:** All Revit API calls go through `RevitBackgroundTask.Raise(Action<UIApplication>)` — singleton ExternalEvent that queues one action at a time.
-- **MVVM:** ViewModel has no Revit API references. Code-behind subscribes to ViewModel events (`ItemSelectionRequested`, `ItemOpenRequested`) and bridges to Revit via ExternalEvent.
-- **Family placement:** `FamilySymbol.Activate()` in a Transaction, then `UIDocument.PromptForFamilyInstancePlacement(symbol)`. Catch `OperationCanceledException` (user pressing Escape is normal).
-- **Grouped results:** Code-behind toggles `PropertyGroupDescription` on the CollectionView when `IsFamilyMode` changes.
-- **Command execution:** `RevitCommandId.LookupPostableCommandId(PostableCommand)` + `uiApp.PostCommand(cmdId)` — runs any built-in Revit command.
-- **BrowserItemKind enum:** Tags every collected item so modes can filter by kind without touching the collector.
+- **MVVM:** ViewModel has no Revit API references. Code-behind subscribes to ViewModel events (`ItemSelectionRequested`, `ItemOpenRequested`, `QuickActionRequested`) and bridges to Revit via ExternalEvent.
+- **BrowserItemKind enum:** Tags every collected item so modes can filter by kind.
+- **Keyboard nav:** Up/Down to navigate, Enter to open/execute, Tab to open action bar, Escape to close action bar or hide pane, Ctrl+F to toggle favorite.
 
 ## Build & Test
 ```powershell

@@ -13,7 +13,8 @@ public enum BrowserItemKind
     Group,
     RevitLink,
     Assembly,
-    Command
+    Command,
+    Shebang
 }
 
 /// <summary>

@@ -1,11 +1,13 @@
 <UserControl x:Class="w_finder.Views.FinderPaneView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:w_finder.Views"
              Background="{DynamicResource PaneBackground}"
              FontFamily="Segoe UI">
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+        <local:EqualityConverter x:Key="EqualityConverter"/>
 
         <!-- Flat ListBox style (no border, themed background) -->
         <Style x:Key="ThemedListBox" TargetType="ListBox">
@@ -333,6 +335,16 @@
                            FontWeight="Bold"
                            Foreground="White"/>
             </Border>
+            <Border Background="#22C55E"
+                    CornerRadius="3"
+                    Padding="6,1"
+                    Margin="0,0,6,0"
+                    Visibility="{Binding IsShebangMode, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="SHEBANG"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Foreground="White"/>
+            </Border>
             <TextBlock FontSize="11"
                        Foreground="{DynamicResource InactiveText}"
                        Text="{Binding StatusText}"/>
@@ -431,6 +443,163 @@
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
+
+        <!-- Quick Action Pill Overlay (positioned below selected item) -->
+        <Canvas x:Name="OverlayCanvas" Grid.Row="3" IsHitTestVisible="False"/>
+        <Border x:Name="ActionBarPopup"
+                Grid.Row="3"
+                VerticalAlignment="Top"
+                HorizontalAlignment="Left"
+                Visibility="Collapsed"
+                Background="{DynamicResource ListBackground}"
+                BorderBrush="{DynamicResource SeparatorBrush}"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="4,3"
+                Margin="8,0,8,0">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="8" Opacity="0.25" ShadowDepth="2"/>
+            </Border.Effect>
+            <ItemsControl ItemsSource="{Binding ActiveActions}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border CornerRadius="10"
+                                Padding="8,3"
+                                Margin="0,0,4,0"
+                                Cursor="Hand">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{DynamicResource ItemHoverBackground}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Value="True">
+                                            <DataTrigger.Binding>
+                                                <MultiBinding Converter="{StaticResource EqualityConverter}">
+                                                    <Binding/>
+                                                    <Binding Path="DataContext.FocusedAction"
+                                                             RelativeSource="{RelativeSource AncestorType=UserControl}"/>
+                                                </MultiBinding>
+                                            </DataTrigger.Binding>
+                                            <Setter Property="Background" Value="{DynamicResource SearchBoxBorderFocus}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontSize="11" Foreground="{DynamicResource PrimaryText}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="{Binding Label}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Value="True">
+                                                    <DataTrigger.Binding>
+                                                        <MultiBinding Converter="{StaticResource EqualityConverter}">
+                                                            <Binding/>
+                                                            <Binding Path="DataContext.FocusedAction"
+                                                                     RelativeSource="{RelativeSource AncestorType=UserControl}"/>
+                                                        </MultiBinding>
+                                                    </DataTrigger.Binding>
+                                                    <Setter Property="Foreground" Value="White"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock Text="{Binding Shortcut, StringFormat=' ({0})'}"
+                                           FontSize="9"
+                                           VerticalAlignment="Center"
+                                           Margin="2,0,0,0"
+                                           Foreground="{DynamicResource SecondaryText}"
+                                           Opacity="0.7"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
+
+        <!-- Inline Rename Overlay (positioned below selected item) -->
+        <Border x:Name="InlineRenamePopup"
+                Grid.Row="3"
+                VerticalAlignment="Top"
+                HorizontalAlignment="Stretch"
+                Visibility="Collapsed"
+                Background="{DynamicResource ListBackground}"
+                BorderBrush="{DynamicResource SearchBoxBorderFocus}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="6,4"
+                Margin="8,0,8,0">
+            <StackPanel>
+                <!-- Sheet rename: two fields -->
+                <DockPanel Visibility="{Binding IsSheetRename, Converter={StaticResource BoolToVisibility}}">
+                    <TextBox x:Name="RenameSheetNumberBox"
+                             Width="100"
+                             DockPanel.Dock="Left"
+                             FontSize="12"
+                             Margin="0,0,6,0"
+                             Padding="4,3"
+                             Background="{DynamicResource SearchBoxBackground}"
+                             Foreground="{DynamicResource PrimaryText}"
+                             CaretBrush="{DynamicResource PrimaryText}"
+                             BorderBrush="{DynamicResource SearchBoxBorder}"
+                             BorderThickness="1"
+                             Text="{Binding RenameSheetNumber, UpdateSourceTrigger=PropertyChanged}"
+                             PreviewKeyDown="RenameBox_PreviewKeyDown"/>
+                    <TextBox x:Name="RenameSheetNameBox"
+                             FontSize="12"
+                             Padding="4,3"
+                             Background="{DynamicResource SearchBoxBackground}"
+                             Foreground="{DynamicResource PrimaryText}"
+                             CaretBrush="{DynamicResource PrimaryText}"
+                             BorderBrush="{DynamicResource SearchBoxBorder}"
+                             BorderThickness="1"
+                             Text="{Binding RenameText, UpdateSourceTrigger=PropertyChanged}"
+                             PreviewKeyDown="RenameBox_PreviewKeyDown"/>
+                </DockPanel>
+                <!-- Normal rename: single field -->
+                <TextBox x:Name="RenameBox"
+                         FontSize="12"
+                         Padding="4,3"
+                         Background="{DynamicResource SearchBoxBackground}"
+                         Foreground="{DynamicResource PrimaryText}"
+                         CaretBrush="{DynamicResource PrimaryText}"
+                         BorderBrush="{DynamicResource SearchBoxBorder}"
+                         BorderThickness="1"
+                         Text="{Binding RenameText, UpdateSourceTrigger=PropertyChanged}"
+                         PreviewKeyDown="RenameBox_PreviewKeyDown">
+                    <TextBox.Style>
+                        <Style TargetType="TextBox">
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSheetRename}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBox.Style>
+                </TextBox>
+            </StackPanel>
+        </Border>
+
+        <!-- Inline Error Overlay (positioned below selected item) -->
+        <Border x:Name="InlineErrorPopup"
+                Grid.Row="3"
+                VerticalAlignment="Top"
+                HorizontalAlignment="Left"
+                Visibility="Collapsed"
+                Background="#E6860A"
+                CornerRadius="4"
+                Padding="8,4"
+                Margin="8,0,8,0">
+            <TextBlock Text="{Binding InlineError}"
+                       FontSize="11"
+                       Foreground="White"/>
+        </Border>
     </Grid>
 
 </UserControl>

@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 using w_finder.Models;
 using w_finder.Services;
+using QuickAction = w_finder.Models.QuickAction;
 
 namespace w_finder.ViewModels;
 
@@ -14,6 +15,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 {
     private List<BrowserItem> _allItems = new();
     private List<BrowserItem> _commandItems = new();
+    private List<BrowserItem> _shebangItems = new();
     private HashSet<long> _favoriteIds = new();
     private readonly DispatcherTimer _debounceTimer;
     private (string query, string? categoryFilter, bool editMode)? _cachedFamilyInput;
@@ -81,10 +83,11 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     public bool IsFamilyMode => _searchText.StartsWith(">");
     public bool IsCommandMode => _searchText.StartsWith(":");
+    public bool IsShebangMode => _searchText.StartsWith("!");
     public bool IsEditFamilyMode => IsFamilyMode && ParseFamilyInput().editMode;
     public bool IsPlaceFamilyMode => IsFamilyMode && !IsEditFamilyMode;
-    public bool IsBrowserMode => !IsFamilyMode && !IsCommandMode;
-    public bool ShowFavorites => HasFavorites && !IsFamilyMode && !IsCommandMode;
+    public bool IsBrowserMode => !IsFamilyMode && !IsCommandMode && !IsShebangMode;
+    public bool ShowFavorites => HasFavorites && !IsFamilyMode && !IsCommandMode && !IsShebangMode;
 
     /// <summary>
     /// Parses the Family Mode input, extracting optional -c category filter,
@@ -135,7 +138,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     private string EffectiveSearchText => IsFamilyMode
         ? ParseFamilyInput().query
-        : IsCommandMode
+        : IsCommandMode || IsShebangMode
             ? _searchText.Substring(1).TrimStart()
             : _searchText;
 
@@ -215,6 +218,11 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         _commandItems = commands;
     }
 
+    public void LoadShebangs(List<BrowserItem> shebangs)
+    {
+        _shebangItems = shebangs;
+    }
+
     public void LoadItems(List<BrowserItem> items, HashSet<long> favoriteIds)
     {
         _allItems = items;
@@ -252,7 +260,20 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         _cachedUnifiedList = null;
         Results.Clear();
 
-        if (IsCommandMode)
+        if (IsShebangMode)
+        {
+            var query = _searchText.Substring(1).TrimStart();
+            var filtered = FuzzyMatcher.Match(_shebangItems, query);
+
+            foreach (var item in filtered)
+                Results.Add(item);
+
+            StatusText = string.IsNullOrWhiteSpace(query)
+                ? $"Shebang Mode \u2014 {_shebangItems.Count} commands"
+                : $"Shebang Mode \u2014 {filtered.Count} of {_shebangItems.Count} commands";
+            HighlightedItem = Results.Count > 0 ? Results[0] : null;
+        }
+        else if (IsCommandMode)
         {
             var query = _searchText.Substring(1).TrimStart();
             var filtered = FuzzyMatcher.Match(_commandItems, query);
@@ -323,6 +344,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsEditFamilyMode));
         OnPropertyChanged(nameof(IsPlaceFamilyMode));
         OnPropertyChanged(nameof(IsCommandMode));
+        OnPropertyChanged(nameof(IsShebangMode));
         OnPropertyChanged(nameof(IsBrowserMode));
         OnPropertyChanged(nameof(ShowFavorites));
     }
@@ -340,6 +362,200 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     {
         if (_selectedItem != null)
             ItemSelectionRequested?.Invoke(_selectedItem);
+    }
+
+    // ── Quick Actions ──────────────────────────────────────────────
+
+    public ObservableCollection<QuickAction> ActiveActions { get; } = new();
+
+    private QuickAction? _focusedAction;
+    public QuickAction? FocusedAction
+    {
+        get => _focusedAction;
+        set { _focusedAction = value; OnPropertyChanged(); }
+    }
+
+    private BrowserItem? _actionBarItem;
+    public BrowserItem? ActionBarItem
+    {
+        get => _actionBarItem;
+        set { _actionBarItem = value; OnPropertyChanged(); }
+    }
+
+    private bool _isActionBarVisible;
+    public bool IsActionBarVisible
+    {
+        get => _isActionBarVisible;
+        set { _isActionBarVisible = value; OnPropertyChanged(); }
+    }
+
+    public event Action<BrowserItem, QuickAction>? QuickActionRequested;
+
+    /// <summary>
+    /// Fired after a Revit mutation so the view can re-collect items.
+    /// </summary>
+    public event Action? RefreshRequested;
+
+    public void RequestRefresh() => RefreshRequested?.Invoke();
+
+    public void OpenActionBar(BrowserItem item)
+    {
+        var actions = QuickActionResolver.Resolve(item.Kind);
+        if (actions.Count == 0) return;
+
+        ActiveActions.Clear();
+        foreach (var a in actions) ActiveActions.Add(a);
+
+        ActionBarItem = item;
+        FocusedAction = actions[0];
+        IsActionBarVisible = true;
+    }
+
+    public void CloseActionBar()
+    {
+        IsActionBarVisible = false;
+        FocusedAction = null;
+        ActiveActions.Clear();
+        ClearInlineError();
+        // Don't clear ActionBarItem here — inline rename needs it
+    }
+
+    public void MoveActionFocus(int direction)
+    {
+        if (ActiveActions.Count == 0 || FocusedAction == null) return;
+        int index = ActiveActions.IndexOf(FocusedAction);
+        int newIndex = Math.Clamp(index + direction, 0, ActiveActions.Count - 1);
+        FocusedAction = ActiveActions[newIndex];
+    }
+
+    public bool ExecuteAction()
+    {
+        if (ActionBarItem == null || FocusedAction == null) return false;
+        var item = ActionBarItem;
+        var action = FocusedAction;
+        // Close the pill bar first (but keep ActionBarItem for rename)
+        IsActionBarVisible = false;
+        FocusedAction = null;
+        ActiveActions.Clear();
+        // Fire the action — for Rename this opens inline rename, so ActionBarItem stays
+        QuickActionRequested?.Invoke(item, action);
+        // Clear ActionBarItem only if rename didn't grab it
+        if (!IsInlineRenameVisible)
+            ActionBarItem = null;
+        return true;
+    }
+
+    // ── Inline Rename ──────────────────────────────────────────────
+
+    private bool _isInlineRenameVisible;
+    public bool IsInlineRenameVisible
+    {
+        get => _isInlineRenameVisible;
+        set { _isInlineRenameVisible = value; OnPropertyChanged(); }
+    }
+
+    private string _renameText = string.Empty;
+    public string RenameText
+    {
+        get => _renameText;
+        set { _renameText = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>For sheets: the sheet number field.</summary>
+    private string _renameSheetNumber = string.Empty;
+    public string RenameSheetNumber
+    {
+        get => _renameSheetNumber;
+        set { _renameSheetNumber = value; OnPropertyChanged(); }
+    }
+
+    private bool _isSheetRename;
+    public bool IsSheetRename
+    {
+        get => _isSheetRename;
+        set { _isSheetRename = value; OnPropertyChanged(); }
+    }
+
+    private BrowserItem? _renameItem;
+    public BrowserItem? RenameItem
+    {
+        get => _renameItem;
+        set { _renameItem = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>Fired so the view can focus the rename textbox.</summary>
+    public event Action? FocusRenameRequested;
+
+    /// <summary>Fired when the user confirms the inline rename.</summary>
+    public event Action<BrowserItem, string, string?>? InlineRenameConfirmed;
+
+    public void OpenInlineRename(BrowserItem item)
+    {
+        CloseActionBar();
+        ClearInlineError();
+        RenameItem = item;
+
+        if (item.Kind == BrowserItemKind.Sheet)
+        {
+            // Sheet names are "Number - Name". Split them.
+            IsSheetRename = true;
+            var dashIndex = item.Name.IndexOf(" - ");
+            if (dashIndex >= 0)
+            {
+                RenameSheetNumber = item.Name.Substring(0, dashIndex);
+                RenameText = item.Name.Substring(dashIndex + 3);
+            }
+            else
+            {
+                RenameSheetNumber = string.Empty;
+                RenameText = item.Name;
+            }
+        }
+        else
+        {
+            IsSheetRename = false;
+            RenameText = item.Name;
+        }
+
+        IsInlineRenameVisible = true;
+        FocusRenameRequested?.Invoke();
+    }
+
+    public void ConfirmInlineRename()
+    {
+        if (RenameItem == null) return;
+        InlineRenameConfirmed?.Invoke(RenameItem, RenameText, IsSheetRename ? RenameSheetNumber : null);
+        CloseInlineRename();
+    }
+
+    public void CloseInlineRename()
+    {
+        IsInlineRenameVisible = false;
+        RenameItem = null;
+        RenameText = string.Empty;
+        RenameSheetNumber = string.Empty;
+        IsSheetRename = false;
+    }
+
+    // ── Inline Error ───────────────────────────────────────────────
+
+    private string? _inlineError;
+    public string? InlineError
+    {
+        get => _inlineError;
+        set { _inlineError = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasInlineError)); }
+    }
+
+    public bool HasInlineError => !string.IsNullOrEmpty(_inlineError);
+
+    public void ShowInlineError(string message)
+    {
+        InlineError = message;
+    }
+
+    public void ClearInlineError()
+    {
+        InlineError = null;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
