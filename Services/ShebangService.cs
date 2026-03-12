@@ -15,6 +15,7 @@ public static class ShebangService
     private static readonly (string id, string name, string category)[] Shebangs =
     {
         ("pu", "Toggle Project Units (Imperial \u2194 SI)", "Units"),
+        ("pin", "Pin All Levels, Grids & Links", "Model"),
     };
 
     /// <summary>
@@ -53,6 +54,9 @@ public static class ShebangService
         {
             case "pu":
                 ToggleProjectUnits(uiApp);
+                break;
+            case "pin":
+                PinAllLevelsGridsLinks(uiApp);
                 break;
         }
     }
@@ -115,6 +119,45 @@ public static class ShebangService
             }
 
             doc.SetUnits(units);
+            tx.Commit();
+        }
+    }
+
+    /// <summary>
+    /// Pins all Levels, Grids, and RevitLinkInstances in the project.
+    /// </summary>
+    private static void PinAllLevelsGridsLinks(UIApplication uiApp)
+    {
+        var doc = uiApp.ActiveUIDocument?.Document;
+        if (doc == null) return;
+
+        var levels = new FilteredElementCollector(doc)
+            .OfClass(typeof(Level))
+            .ToElements();
+
+        var grids = new FilteredElementCollector(doc)
+            .OfClass(typeof(Grid))
+            .ToElements();
+
+        var links = new FilteredElementCollector(doc)
+            .OfClass(typeof(RevitLinkInstance))
+            .ToElements();
+
+        int pinned = 0;
+
+        using (var tx = new Transaction(doc, "Rauncher: Pin Levels, Grids & Links"))
+        {
+            tx.Start();
+
+            foreach (var element in levels.Concat(grids).Concat(links))
+            {
+                if (!element.Pinned)
+                {
+                    element.Pinned = true;
+                    pinned++;
+                }
+            }
+
             tx.Commit();
         }
     }

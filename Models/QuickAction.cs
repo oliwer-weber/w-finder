@@ -7,6 +7,7 @@ public enum QuickActionKind
     Duplicate,
     DuplicateWithDetailing,
     DuplicateDependent,
+    ExcelExport,
     AssignShortcut,
     RemoveShortcut
 }
