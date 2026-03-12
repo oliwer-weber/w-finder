@@ -33,7 +33,7 @@ public class FinderCommand : IExternalCommand
             }
 
             // Load command and shebang items (static, not per-document)
-            App.ViewModel.LoadCommands(CommandCollector.Collect());
+            App.ViewModel.LoadCommands(CommandCollector.Collect(uiApp));
             App.ViewModel.LoadShebangs(ShebangService.Collect());
 
             pane.Show();

@@ -6,7 +6,9 @@ public enum QuickActionKind
     Delete,
     Duplicate,
     DuplicateWithDetailing,
-    DuplicateDependent
+    DuplicateDependent,
+    AssignShortcut,
+    RemoveShortcut
 }
 
 public class QuickAction
