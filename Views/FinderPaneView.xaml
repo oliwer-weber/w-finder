@@ -8,6 +8,7 @@
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
         <local:EqualityConverter x:Key="EqualityConverter"/>
+        <local:NullToCollapsedConverter x:Key="NullToCollapsedConverter"/>
 
         <!-- Flat ListBox style (no border, themed background) -->
         <Style x:Key="ThemedListBox" TargetType="ListBox">
@@ -381,6 +382,15 @@
                                         Style="{StaticResource StarButton}"
                                         Click="ToggleFavorite_Click"
                                         Tag="{Binding}"/>
+                                <TextBlock Text="{Binding ShortcutKeys}"
+                                           DockPanel.Dock="Right"
+                                           FontSize="10"
+                                           FontFamily="Consolas"
+                                           Foreground="{DynamicResource SecondaryText}"
+                                           VerticalAlignment="Center"
+                                           Margin="4,0"
+                                           Opacity="0.7"
+                                           Visibility="{Binding ShortcutKeys, Converter={StaticResource NullToCollapsedConverter}}"/>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="{Binding Name}"
                                                FontSize="12"
@@ -429,6 +439,15 @@
                                 Style="{StaticResource StarButton}"
                                 Click="ToggleFavorite_Click"
                                 Tag="{Binding}"/>
+                        <TextBlock Text="{Binding ShortcutKeys}"
+                                   DockPanel.Dock="Right"
+                                   FontSize="10"
+                                   FontFamily="Consolas"
+                                   Foreground="{DynamicResource SecondaryText}"
+                                   VerticalAlignment="Center"
+                                   Margin="4,0"
+                                   Opacity="0.7"
+                                   Visibility="{Binding ShortcutKeys, Converter={StaticResource NullToCollapsedConverter}}"/>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="{Binding Name}"
                                        FontSize="12"

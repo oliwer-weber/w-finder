@@ -33,6 +33,7 @@ public partial class FinderPaneView : UserControl
         App.ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         App.ViewModel.FocusRenameRequested += OnFocusRenameRequested;
         App.ViewModel.InlineRenameConfirmed += OnInlineRenameConfirmed;
+        App.ViewModel.ShortcutEditConfirmed += OnShortcutEditConfirmed;
         App.ViewModel.RefreshRequested += OnRefreshRequested;
 
         ApplyTheme(ThemeService.IsDarkMode());
@@ -246,6 +247,7 @@ public partial class FinderPaneView : UserControl
                         var cmdName = highlighted.CommandName;
                         if (cmdName != null && Enum.TryParse<PostableCommand>(cmdName, out var postableCmd))
                         {
+                            // PostableCommand path (known enum commands)
                             RevitBackgroundTask.Raise(uiApp =>
                             {
                                 var pane = uiApp.GetDockablePane(App.PaneId);
@@ -253,6 +255,29 @@ public partial class FinderPaneView : UserControl
 
                                 var cmdId = RevitCommandId.LookupPostableCommandId(postableCmd);
                                 uiApp.PostCommand(cmdId);
+                            });
+                        }
+                        else if (highlighted.RevitCommandId != null)
+                        {
+                            // XML-only command path (not in PostableCommand enum)
+                            var revitCmdIdStr = highlighted.RevitCommandId;
+                            RevitBackgroundTask.Raise(uiApp =>
+                            {
+                                var pane = uiApp.GetDockablePane(App.PaneId);
+                                pane.Hide();
+
+                                try
+                                {
+                                    var cmdId = RevitCommandId.LookupCommandId(revitCmdIdStr);
+                                    if (cmdId != null)
+                                        uiApp.PostCommand(cmdId);
+                                }
+                                catch
+                                {
+                                    // Command may not be available in the current context
+                                    Dispatcher.Invoke(() =>
+                                        App.ViewModel.ShowInlineError("Command unavailable in current context"));
+                                }
                             });
                         }
                     }
@@ -602,6 +627,14 @@ public partial class FinderPaneView : UserControl
             case Models.QuickActionKind.DuplicateDependent:
                 DuplicateView(item, ViewDuplicateOption.AsDependent);
                 break;
+
+            case Models.QuickActionKind.AssignShortcut:
+                App.ViewModel.OpenShortcutEdit(item);
+                break;
+
+            case Models.QuickActionKind.RemoveShortcut:
+                HandleRemoveShortcut(item);
+                break;
         }
     }
 
@@ -737,6 +770,68 @@ public partial class FinderPaneView : UserControl
 
             RefreshAfterMutation(uiApp);
         });
+    }
+
+    // ── Shortcut Edit Handlers ──────────────────────────────────────
+
+    private void OnShortcutEditConfirmed(BrowserItem item, string newShortcut)
+    {
+        var commandId = item.RevitCommandId;
+        if (string.IsNullOrEmpty(commandId)) return;
+
+        var trimmed = newShortcut.Trim().ToUpperInvariant();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            // Treat empty input as remove
+            HandleRemoveShortcut(item);
+            return;
+        }
+
+        var success = KeyboardShortcutService.AssignShortcut(commandId, trimmed);
+        if (success)
+        {
+            item.ShortcutKeys = KeyboardShortcutService.GetShortcutByCommandId(commandId);
+            CommandCollector.Invalidate();
+            App.ViewModel.ShowInlineError("Shortcut saved — takes effect next Revit session");
+        }
+        else
+        {
+            App.ViewModel.ShowInlineError("Failed to save shortcut");
+        }
+
+        Dispatcher.Invoke(() =>
+        {
+            SearchBox.Focus();
+            Keyboard.Focus(SearchBox);
+        });
+    }
+
+    private void HandleRemoveShortcut(BrowserItem item)
+    {
+        var commandId = item.RevitCommandId;
+        if (string.IsNullOrEmpty(commandId))
+        {
+            App.ViewModel.ShowInlineError("No command ID available");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(item.ShortcutKeys))
+        {
+            App.ViewModel.ShowInlineError("No shortcut assigned");
+            return;
+        }
+
+        var success = KeyboardShortcutService.RemoveShortcut(commandId);
+        if (success)
+        {
+            item.ShortcutKeys = null;
+            CommandCollector.Invalidate();
+            App.ViewModel.ShowInlineError("Shortcut removed — takes effect next Revit session");
+        }
+        else
+        {
+            App.ViewModel.ShowInlineError("Failed to remove shortcut");
+        }
     }
 
     /// <summary>

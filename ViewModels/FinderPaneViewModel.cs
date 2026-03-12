@@ -400,7 +400,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     public void OpenActionBar(BrowserItem item)
     {
-        var actions = QuickActionResolver.Resolve(item.Kind);
+        var actions = QuickActionResolver.Resolve(item);
         if (actions.Count == 0) return;
 
         ActiveActions.Clear();
@@ -524,6 +524,11 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public void ConfirmInlineRename()
     {
         if (RenameItem == null) return;
+        if (IsShortcutEditMode)
+        {
+            ConfirmShortcutEdit();
+            return;
+        }
         InlineRenameConfirmed?.Invoke(RenameItem, RenameText, IsSheetRename ? RenameSheetNumber : null);
         CloseInlineRename();
     }
@@ -531,10 +536,47 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public void CloseInlineRename()
     {
         IsInlineRenameVisible = false;
+        IsShortcutEditMode = false;
         RenameItem = null;
         RenameText = string.Empty;
         RenameSheetNumber = string.Empty;
         IsSheetRename = false;
+    }
+
+    // ── Shortcut Editing (reuses inline rename popup) ───────────
+
+    private bool _isShortcutEditMode;
+    /// <summary>
+    /// When true, the inline rename popup is being used to edit a keyboard shortcut
+    /// instead of renaming an element.
+    /// </summary>
+    public bool IsShortcutEditMode
+    {
+        get => _isShortcutEditMode;
+        set { _isShortcutEditMode = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>Fired when the user confirms a shortcut edit.</summary>
+    public event Action<BrowserItem, string>? ShortcutEditConfirmed;
+
+    public void OpenShortcutEdit(BrowserItem item)
+    {
+        CloseActionBar();
+        ClearInlineError();
+        RenameItem = item;
+        IsSheetRename = false;
+        IsShortcutEditMode = true;
+        RenameText = item.ShortcutKeys ?? string.Empty;
+
+        IsInlineRenameVisible = true;
+        FocusRenameRequested?.Invoke();
+    }
+
+    public void ConfirmShortcutEdit()
+    {
+        if (RenameItem == null) return;
+        ShortcutEditConfirmed?.Invoke(RenameItem, RenameText);
+        CloseInlineRename();
     }
 
     // ── Inline Error ───────────────────────────────────────────────

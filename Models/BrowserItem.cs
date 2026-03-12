@@ -45,8 +45,21 @@ public class BrowserItem : INotifyPropertyChanged
 
     /// <summary>
     /// For Command items: the PostableCommand enum name (used to look up the RevitCommandId).
+    /// Null for XML-only commands that aren't in the PostableCommand enum.
     /// </summary>
     public string? CommandName { get; init; }
+
+    /// <summary>
+    /// The Revit internal command ID string (e.g. "ID_EDIT_PASTE", "CustomCtrl_%...").
+    /// Used for keyboard shortcut lookups and for executing XML-only commands.
+    /// </summary>
+    public string? RevitCommandId { get; init; }
+
+    /// <summary>
+    /// Keyboard shortcut display text (e.g. "Ctrl+S", "VG").
+    /// Null if no shortcut is assigned.
+    /// </summary>
+    public string? ShortcutKeys { get; set; }
 
     private bool _isFavorite;
     public bool IsFavorite
