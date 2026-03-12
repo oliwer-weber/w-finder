@@ -120,6 +120,17 @@ public static class BrowserItemCollector
             });
         }
 
+        // Build a set of type IDs that have at least one placed instance in the project.
+        // Used by the "filter placed types only" setting in Family Mode.
+        var placedTypeIds = new HashSet<long>();
+        foreach (var inst in new FilteredElementCollector(doc)
+            .OfClass(typeof(FamilyInstance)))
+        {
+            var typeId = inst.GetTypeId();
+            if (typeId != ElementId.InvalidElementId)
+                placedTypeIds.Add(typeId.Value);
+        }
+
         // Collect all FamilySymbols in one batch — avoids N+1 doc.GetElement() calls.
         var symbols = new FilteredElementCollector(doc)
             .OfClass(typeof(FamilySymbol))
@@ -132,7 +143,10 @@ public static class BrowserItemCollector
                 Name = $"{symbol.Family.Name}: {symbol.Name}",
                 Category = symbol.Family.FamilyCategory?.Name ?? "Family Type",
                 ElementId = symbol.Id.Value,
-                Kind = BrowserItemKind.FamilyType
+                Kind = BrowserItemKind.FamilyType,
+                IsPlacedInProject = placedTypeIds.Contains(symbol.Id.Value),
+                FamilyName = symbol.Family.Name,
+                TypeName = symbol.Name
             });
         }
     }

@@ -61,6 +61,43 @@ public class BrowserItem : INotifyPropertyChanged
     /// </summary>
     public string? ShortcutKeys { get; set; }
 
+    /// <summary>
+    /// True if at least one instance of this family type exists in the project.
+    /// Set during collection, used by the "filter placed types" setting.
+    /// </summary>
+    public bool IsPlacedInProject { get; set; }
+
+    /// <summary>
+    /// The family name portion for FamilyType items (e.g. "Single-Flush" from "Single-Flush: 36x84").
+    /// Used for two-stage family navigation grouping.
+    /// </summary>
+    public string? FamilyName { get; init; }
+
+    /// <summary>
+    /// The type name portion for FamilyType items (e.g. "36x84" from "Single-Flush: 36x84").
+    /// </summary>
+    public string? TypeName { get; init; }
+
+    /// <summary>
+    /// Number of types in this family (set on family-level summary rows).
+    /// </summary>
+    public int TypeCount { get; set; }
+
+    /// <summary>
+    /// True if this is a synthetic "back" row in two-stage family navigation.
+    /// </summary>
+    public bool IsBackRow { get; set; }
+
+    /// <summary>
+    /// Section/group key for result grouping (e.g. "VIEWS", "DOORS", "Architecture > Build").
+    /// </summary>
+    public string GroupKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The ribbon tab this command belongs to (for Command mode grouping).
+    /// </summary>
+    public string? RibbonTab { get; init; }
+
     private bool _isFavorite;
     public bool IsFavorite
     {

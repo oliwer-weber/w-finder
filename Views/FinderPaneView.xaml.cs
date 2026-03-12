@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -10,15 +11,14 @@ using w_finder.Helpers;
 using w_finder.Models;
 using w_finder.Services;
 using w_finder.ViewModels;
+using WpfColor = System.Windows.Media.Color;
+using WpfPoint = System.Windows.Point;
+using WpfVisibility = System.Windows.Visibility;
 
 namespace w_finder.Views;
 
 public partial class FinderPaneView : UserControl
 {
-    // Unicode icons: ☀ (sun) for dark mode toggle, ☾ (moon) for light mode toggle
-    private const string SunIcon = "\u2600";
-    private const string MoonIcon = "\u263E";
-
     public FinderPaneView()
     {
         InitializeComponent();
@@ -37,8 +37,235 @@ public partial class FinderPaneView : UserControl
         App.ViewModel.ExcelExportConfirmed += OnExcelExportConfirmed;
         App.ViewModel.RefreshRequested += OnRefreshRequested;
 
-        ApplyTheme(ThemeService.IsDarkMode());
+        ApplyTheme(SettingsService.Current.IsDarkMode);
+
+        SettingsService.SettingsChanged += () =>
+            Dispatcher.Invoke(() =>
+            {
+                ApplyTheme(SettingsService.Current.IsDarkMode);
+                App.ViewModel.FilterPlacedTypes = SettingsService.Current.FilterPlacedTypesOnly;
+                App.ViewModel.RefreshResults();
+            });
+
+        // Set up TextInput handler for consumed prefix detection
+        SearchBox.PreviewTextInput += SearchBox_PreviewTextInput;
     }
+
+    // ── Consumed Prefix (Mode Pill) ────────────────────────────────
+
+    /// <summary>
+    /// Intercepts prefix characters (>, :, !) before they appear in the text box.
+    /// Consumes the character and activates the corresponding mode pill.
+    /// </summary>
+    private void SearchBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (App.ViewModel.HasModePill) return; // Already in a mode
+
+        // Only consume prefix if the search box is empty (or effectively empty)
+        if (!string.IsNullOrEmpty(App.ViewModel.SearchText)) return;
+
+        switch (e.Text)
+        {
+            case ">":
+                e.Handled = true;
+                App.ViewModel.ActivateMode(ActiveMode.Place);
+                UpdateModePillAccent();
+                UpdateEmptyState();
+                UpdateResultGrouping();
+                break;
+            case ":":
+                e.Handled = true;
+                App.ViewModel.ActivateMode(ActiveMode.Command);
+                UpdateModePillAccent();
+                UpdateEmptyState();
+                UpdateResultGrouping();
+                break;
+            case "!":
+                e.Handled = true;
+                App.ViewModel.ActivateMode(ActiveMode.Shebang);
+                UpdateModePillAccent();
+                UpdateEmptyState();
+                UpdateResultGrouping();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Updates the mode pill border accent color based on the active mode.
+    /// </summary>
+    private void UpdateModePillAccent()
+    {
+        if (!App.ViewModel.HasModePill)
+        {
+            // Fade out pill
+            var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(60));
+            ModePillBorder.BeginAnimation(OpacityProperty, fadeOut);
+            return;
+        }
+
+        WpfColor accentColor = App.ViewModel.ActiveMode switch
+        {
+            ActiveMode.Place => (WpfColor)FindResource("PlaceAccentColor"),
+            ActiveMode.Edit => (WpfColor)FindResource("EditAccentColor"),
+            ActiveMode.Command => (WpfColor)FindResource("CommandAccentColor"),
+            ActiveMode.Shebang => (WpfColor)FindResource("ShebangAccentColor"),
+            _ => WpfColor.FromArgb(0, 0, 0, 0)
+        };
+
+        // Set the left border to accent, other borders to PillBorder
+        var pillBorderBrush = (SolidColorBrush)FindResource("PillBorder");
+        ModePillBorder.BorderBrush = pillBorderBrush;
+        ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
+
+        // Override the left border color using a custom border approach
+        // WPF doesn't support per-side border colors natively, so we use a nested approach
+        // For simplicity, tint the entire left border with accent
+        var accentBrush = new SolidColorBrush(accentColor);
+        accentBrush.Freeze();
+        ModePillBorder.BorderBrush = accentBrush;
+        ModePillBorder.BorderThickness = new Thickness(2, 0, 0, 0);
+
+        // Set pill background to accent at 8% opacity
+        var bgColor = WpfColor.FromArgb((byte)(255 * 0.08), accentColor.R, accentColor.G, accentColor.B);
+        ModePillBorder.Background = new SolidColorBrush(bgColor);
+
+        // Fade in pill
+        ModePillBorder.Opacity = 0;
+        var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(80));
+        ModePillBorder.BeginAnimation(OpacityProperty, fadeIn);
+    }
+
+    // ── Empty State Management ─────────────────────────────────────
+
+    private void UpdateEmptyState()
+    {
+        bool isEmpty = App.ViewModel.IsEmptyState;
+
+        // Browser hints (Row 2) — shown when in browser mode with empty search
+        BrowserHints.Visibility = (isEmpty && App.ViewModel.ActiveMode == ActiveMode.Browser)
+            ? WpfVisibility.Visible
+            : WpfVisibility.Collapsed;
+
+        // Hide all empty state panels first
+        BrowserEmptyState.Visibility = WpfVisibility.Collapsed;
+        PlaceEmptyState.Visibility = WpfVisibility.Collapsed;
+        CommandEmptyState.Visibility = WpfVisibility.Collapsed;
+        ShebangEmptyState.Visibility = WpfVisibility.Collapsed;
+
+        if (!isEmpty)
+        {
+            EmptyStatePanel.Visibility = WpfVisibility.Collapsed;
+            return;
+        }
+
+        switch (App.ViewModel.ActiveMode)
+        {
+            case ActiveMode.Browser:
+                // Hints are now in BrowserHints (Row 2), nothing extra here
+                break;
+            case ActiveMode.Place:
+            case ActiveMode.Edit:
+                PlaceEmptyState.Visibility = WpfVisibility.Visible;
+                PopulateCategoryChips();
+                break;
+            case ActiveMode.Command:
+                CommandEmptyState.Visibility = WpfVisibility.Visible;
+                break;
+            case ActiveMode.Shebang:
+                ShebangEmptyState.Visibility = WpfVisibility.Visible;
+                break;
+        }
+
+        // Only show EmptyStatePanel if a non-browser empty state is active
+        bool hasNonBrowserContent = PlaceEmptyState.Visibility == WpfVisibility.Visible
+            || CommandEmptyState.Visibility == WpfVisibility.Visible
+            || ShebangEmptyState.Visibility == WpfVisibility.Visible;
+
+        if (!hasNonBrowserContent)
+        {
+            EmptyStatePanel.Visibility = WpfVisibility.Collapsed;
+            return;
+        }
+
+        EmptyStatePanel.Visibility = WpfVisibility.Visible;
+
+        // Fade in empty state
+        EmptyStatePanel.Opacity = 0;
+        var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(90))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        EmptyStatePanel.BeginAnimation(OpacityProperty, fadeIn);
+    }
+
+    /// <summary>
+    /// Populates category filter chips in the Place mode empty state.
+    /// </summary>
+    private void PopulateCategoryChips()
+    {
+        CategoryChipsPanel.Children.Clear();
+        int maxChips = 6;
+        int shown = 0;
+
+        foreach (var cat in App.ViewModel.AvailableCategories)
+        {
+            if (shown >= maxChips) break;
+
+            var chip = new Border
+            {
+                CornerRadius = new CornerRadius(2),
+                Padding = new Thickness(8, 3, 8, 3),
+                Margin = new Thickness(0, 0, 4, 4),
+                Background = (Brush)FindResource("ItemHoverBackground"),
+                Cursor = Cursors.Hand,
+                Child = new TextBlock
+                {
+                    Text = cat,
+                    FontSize = 10,
+                    FontFamily = new FontFamily("Segoe UI"),
+                    Foreground = (Brush)FindResource("PrimaryText")
+                }
+            };
+
+            var category = cat; // capture for lambda
+            chip.MouseLeftButtonDown += (_, _) => App.ViewModel.ApplyCategoryFilter(category);
+            CategoryChipsPanel.Children.Add(chip);
+            shown++;
+        }
+
+        // Show overflow count if needed
+        int remaining = App.ViewModel.AvailableCategories.Count - shown;
+        if (remaining > 0)
+        {
+            CategoryChipsPanel.Children.Add(new TextBlock
+            {
+                Text = $"+{remaining} more",
+                FontSize = 10,
+                Foreground = (Brush)FindResource("MutedText"),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(4, 0, 0, 4)
+            });
+        }
+    }
+
+
+    // ── Result Grouping ────────────────────────────────────────────
+
+    private void UpdateResultGrouping()
+    {
+        var view = CollectionViewSource.GetDefaultView(ResultsList.ItemsSource);
+        if (view == null) return;
+
+        view.GroupDescriptions.Clear();
+
+        // Group by GroupKey for all modes except Shebang
+        if (!App.ViewModel.IsShebangMode)
+        {
+            view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BrowserItem.GroupKey)));
+        }
+    }
+
+    // ── ViewModel Property Changed Handler ─────────────────────────
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
@@ -56,35 +283,112 @@ public partial class FinderPaneView : UserControl
 
         if (e.PropertyName == nameof(FinderPaneViewModel.HasInlineError))
         {
-            // Set background color: green for success, orange for error
             InlineErrorPopup.Background = App.ViewModel.IsSuccessMessage
-                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2E, 0x7D, 0x32))
-                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE6, 0x86, 0x0A));
+                ? new SolidColorBrush(WpfColor.FromRgb(0x2E, 0x7D, 0x32))
+                : new SolidColorBrush(WpfColor.FromRgb(0xE6, 0x86, 0x0A));
             PositionOverlay(InlineErrorPopup);
             return;
         }
 
-        if (e.PropertyName != nameof(FinderPaneViewModel.IsFamilyMode)
-            && e.PropertyName != nameof(FinderPaneViewModel.IsCommandMode)
-            && e.PropertyName != nameof(FinderPaneViewModel.IsShebangMode)) return;
-
-        var view = CollectionViewSource.GetDefaultView(ResultsList.ItemsSource);
-        if (view == null) return;
-
-        if (App.ViewModel.IsFamilyMode)
+        if (e.PropertyName == nameof(FinderPaneViewModel.ActiveMode))
         {
-            if (view.GroupDescriptions.Count == 0)
-                view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BrowserItem.Category)));
+            UpdateModePillAccent();
+            UpdateEmptyState();
+
+            // Crossfade results on mode switch
+            CrossfadeResults(() => UpdateResultGrouping());
+            return;
         }
-        else
+
+        if (e.PropertyName == nameof(FinderPaneViewModel.IsEmptyState))
         {
-            view.GroupDescriptions.Clear();
+            UpdateEmptyState();
+            return;
+        }
+
+        if (e.PropertyName == nameof(FinderPaneViewModel.FamilyNavigationStage))
+        {
+            // Crossfade results on stage transition
+            CrossfadeResults(null);
+            return;
+        }
+
+        if (e.PropertyName == nameof(FinderPaneViewModel.HighlightedItem))
+        {
+            SyncListSelections();
+            return;
+        }
+
+        // Keep grouping in sync when results refresh
+        if (e.PropertyName == nameof(FinderPaneViewModel.IsFamilyMode)
+            || e.PropertyName == nameof(FinderPaneViewModel.IsCommandMode)
+            || e.PropertyName == nameof(FinderPaneViewModel.IsShebangMode)
+            || e.PropertyName == nameof(FinderPaneViewModel.IsBrowserMode))
+        {
+            UpdateResultGrouping();
         }
     }
 
     /// <summary>
-    /// Positions a popup overlay just below the currently highlighted ListBoxItem.
+    /// Keeps FavoritesList and ResultsList selections mutually exclusive.
+    /// When the highlighted item is in one list, the other list's selection is cleared.
     /// </summary>
+    private void SyncListSelections()
+    {
+        _syncingSelections = true;
+        try
+        {
+            var item = App.ViewModel.HighlightedItem;
+            if (item == null)
+            {
+                FavoritesList.SelectedItem = null;
+                ResultsList.SelectedItem = null;
+                return;
+            }
+
+            if (App.ViewModel.Favorites.Contains(item))
+            {
+                // Item is in favorites — select there, clear results
+                FavoritesList.SelectedItem = item;
+                ResultsList.SelectedItem = null;
+            }
+            else
+            {
+                // Item is in results — select there, clear favorites
+                ResultsList.SelectedItem = item;
+                FavoritesList.SelectedItem = null;
+            }
+        }
+        finally
+        {
+            _syncingSelections = false;
+        }
+    }
+
+    /// <summary>
+    /// Crossfades the results list: fade out, optionally do work, fade in.
+    /// </summary>
+    private void CrossfadeResults(Action? midAction)
+    {
+        var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(50))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        fadeOut.Completed += (_, _) =>
+        {
+            midAction?.Invoke();
+
+            var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(60))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+            ResultsList.BeginAnimation(OpacityProperty, fadeIn);
+        };
+        ResultsList.BeginAnimation(OpacityProperty, fadeOut);
+    }
+
+    // ── Overlay Positioning ────────────────────────────────────────
+
     private void PositionOverlay(Border overlay)
     {
         bool shouldShow = overlay == ActionBarPopup ? App.ViewModel.IsActionBarVisible
@@ -93,18 +397,17 @@ public partial class FinderPaneView : UserControl
 
         if (!shouldShow)
         {
-            overlay.Visibility = System.Windows.Visibility.Collapsed;
+            overlay.Visibility = WpfVisibility.Collapsed;
             return;
         }
 
         var highlighted = App.ViewModel.HighlightedItem ?? App.ViewModel.ActionBarItem ?? App.ViewModel.RenameItem;
         if (highlighted == null)
         {
-            overlay.Visibility = System.Windows.Visibility.Collapsed;
+            overlay.Visibility = WpfVisibility.Collapsed;
             return;
         }
 
-        // Find the ListBoxItem container for the highlighted item
         var container = ResultsList.ItemContainerGenerator.ContainerFromItem(highlighted) as ListBoxItem;
         if (container == null)
         {
@@ -113,19 +416,19 @@ public partial class FinderPaneView : UserControl
 
         if (container == null)
         {
-            // Fallback: show at top of results area
             overlay.Margin = new Thickness(8, 0, 8, 0);
-            overlay.Visibility = System.Windows.Visibility.Visible;
+            overlay.Visibility = WpfVisibility.Visible;
             return;
         }
 
-        // Get the position of the container relative to the ResultsList
         var transform = container.TransformToAncestor(ResultsList);
-        var point = transform.Transform(new System.Windows.Point(0, container.ActualHeight));
+        var point = transform.Transform(new WpfPoint(0, container.ActualHeight));
 
         overlay.Margin = new Thickness(8, point.Y, 8, 0);
-        overlay.Visibility = System.Windows.Visibility.Visible;
+        overlay.Visibility = WpfVisibility.Visible;
     }
+
+    // ── Focus Handlers ─────────────────────────────────────────────
 
     private void OnFocusSearchRequested()
     {
@@ -166,13 +469,11 @@ public partial class FinderPaneView : UserControl
         {
             e.Handled = true;
             App.ViewModel.CloseInlineRename();
-            // Return focus to search box
             SearchBox.Focus();
             Keyboard.Focus(SearchBox);
         }
         else if (e.Key == Key.Tab && App.ViewModel.IsSheetRename)
         {
-            // Tab between sheet number and sheet name fields
             e.Handled = true;
             if (sender == RenameSheetNumberBox)
             {
@@ -187,10 +488,24 @@ public partial class FinderPaneView : UserControl
         }
     }
 
+    // ── Main Keyboard Handler ──────────────────────────────────────
+
     private void SearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         switch (e.Key)
         {
+            case Key.Back:
+                // Backspace on empty text with a mode pill → deactivate mode
+                if (string.IsNullOrEmpty(App.ViewModel.SearchText) && App.ViewModel.HasModePill)
+                {
+                    e.Handled = true;
+                    App.ViewModel.DeactivateMode();
+                    UpdateModePillAccent();
+                    UpdateEmptyState();
+                    UpdateResultGrouping();
+                }
+                break;
+
             case Key.Escape:
                 e.Handled = true;
                 if (App.ViewModel.IsInlineRenameVisible)
@@ -205,6 +520,19 @@ public partial class FinderPaneView : UserControl
                 {
                     App.ViewModel.CloseActionBar();
                 }
+                else if (App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.TypeLevel)
+                {
+                    // Escape in Stage 2 → back to Stage 1
+                    App.ViewModel.NavigateBackToFamilies();
+                }
+                else if (App.ViewModel.HasModePill)
+                {
+                    // Escape with a mode pill → clear and return to Browser
+                    App.ViewModel.DeactivateMode();
+                    UpdateModePillAccent();
+                    UpdateEmptyState();
+                    UpdateResultGrouping();
+                }
                 else
                 {
                     RevitBackgroundTask.Raise(uiApp =>
@@ -217,13 +545,11 @@ public partial class FinderPaneView : UserControl
 
             case Key.Enter:
                 e.Handled = true;
-                // Inline error dismisses on Enter
                 if (App.ViewModel.HasInlineError)
                 {
                     App.ViewModel.ClearInlineError();
                     break;
                 }
-                // Quick action bar takes priority
                 if (App.ViewModel.IsActionBarVisible)
                 {
                     App.ViewModel.ExecuteAction();
@@ -232,9 +558,28 @@ public partial class FinderPaneView : UserControl
                 var highlighted = App.ViewModel.HighlightedItem;
                 if (highlighted != null)
                 {
+                    // Two-stage family nav: drill into family at Stage 1
+                    if (App.ViewModel.IsFamilyMode
+                        && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
+                        && highlighted.TypeCount > 0)
+                    {
+                        App.ViewModel.DrillIntoFamily(highlighted);
+                        break;
+                    }
+
+                    // Back row → navigate back
+                    if (highlighted.IsBackRow)
+                    {
+                        App.ViewModel.NavigateBackToFamilies();
+                        break;
+                    }
+
+                    // Record usage for recent items
+                    string modeKey = App.ViewModel.ActiveMode.ToString();
+                    RecentItemsStore.RecordUsage(modeKey, highlighted.ElementId, highlighted.Name);
+
                     if (App.ViewModel.IsShebangMode && highlighted.Kind == BrowserItemKind.Shebang)
                     {
-                        // Shebang Mode: execute the custom command and close pane
                         var shebangId = highlighted.CommandName;
                         if (shebangId != null)
                         {
@@ -248,29 +593,37 @@ public partial class FinderPaneView : UserControl
                     }
                     else if (App.ViewModel.IsCommandMode && highlighted.Kind == BrowserItemKind.Command)
                     {
-                        // Command Mode: execute the Revit command
                         var cmdName = highlighted.CommandName;
-                        if (cmdName != null && Enum.TryParse<PostableCommand>(cmdName, out var postableCmd))
+                        if (cmdName == "__rauncher_settings")
                         {
-                            // PostableCommand path (known enum commands)
+                            RevitBackgroundTask.Raise(uiApp =>
+                            {
+                                Dispatcher.Invoke(() =>
+                                {
+                                    var window = new SettingsWindow();
+                                    var helper = new System.Windows.Interop.WindowInteropHelper(window);
+                                    helper.Owner = uiApp.MainWindowHandle;
+                                    window.ShowDialog();
+                                });
+                            });
+                        }
+                        else if (cmdName != null && Enum.TryParse<PostableCommand>(cmdName, out var postableCmd))
+                        {
                             RevitBackgroundTask.Raise(uiApp =>
                             {
                                 var pane = uiApp.GetDockablePane(App.PaneId);
                                 pane.Hide();
-
                                 var cmdId = RevitCommandId.LookupPostableCommandId(postableCmd);
                                 uiApp.PostCommand(cmdId);
                             });
                         }
                         else if (highlighted.RevitCommandId != null)
                         {
-                            // XML-only command path (not in PostableCommand enum)
                             var revitCmdIdStr = highlighted.RevitCommandId;
                             RevitBackgroundTask.Raise(uiApp =>
                             {
                                 var pane = uiApp.GetDockablePane(App.PaneId);
                                 pane.Hide();
-
                                 try
                                 {
                                     var cmdId = RevitCommandId.LookupCommandId(revitCmdIdStr);
@@ -279,7 +632,6 @@ public partial class FinderPaneView : UserControl
                                 }
                                 catch
                                 {
-                                    // Command may not be available in the current context
                                     Dispatcher.Invoke(() =>
                                         App.ViewModel.ShowInlineError("Command unavailable in current context"));
                                 }
@@ -290,7 +642,6 @@ public partial class FinderPaneView : UserControl
                     {
                         if (App.ViewModel.IsEditFamilyMode)
                         {
-                            // Edit Family Mode: open the family for editing
                             RevitBackgroundTask.Raise(uiApp =>
                             {
                                 var uidoc = uiApp.ActiveUIDocument;
@@ -307,7 +658,6 @@ public partial class FinderPaneView : UserControl
                         }
                         else
                         {
-                            // Family Mode: activate the symbol and start placement
                             RevitBackgroundTask.Raise(uiApp =>
                             {
                                 var uidoc = uiApp.ActiveUIDocument;
@@ -324,14 +674,12 @@ public partial class FinderPaneView : UserControl
                                     }
                                     var pane = uiApp.GetDockablePane(App.PaneId);
                                     pane.Hide();
-
                                     try
                                     {
                                         uidoc.PromptForFamilyInstancePlacement(symbol);
                                     }
                                     catch (Autodesk.Revit.Exceptions.OperationCanceledException)
                                     {
-                                        // User pressed Escape to finish placing — normal
                                     }
                                 }
                             });
@@ -339,7 +687,6 @@ public partial class FinderPaneView : UserControl
                     }
                     else
                     {
-                        // Normal mode: open the view and hide the pane.
                         RevitBackgroundTask.Raise(uiApp =>
                         {
                             var uidoc = uiApp.ActiveUIDocument;
@@ -350,7 +697,6 @@ public partial class FinderPaneView : UserControl
                                 if (element is View view)
                                     uidoc.RequestViewChange(view);
                             }
-
                             var pane = uiApp.GetDockablePane(App.PaneId);
                             pane.Hide();
                         });
@@ -360,8 +706,42 @@ public partial class FinderPaneView : UserControl
 
             case Key.Tab:
                 e.Handled = true;
+                // In family mode Stage 1, Tab drills into family (same as Enter)
+                if (App.ViewModel.IsFamilyMode
+                    && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
+                    && App.ViewModel.HighlightedItem is BrowserItem familyItem
+                    && familyItem.TypeCount > 0)
+                {
+                    App.ViewModel.DrillIntoFamily(familyItem);
+                    break;
+                }
+                // Otherwise, open action bar
                 if (App.ViewModel.HighlightedItem is BrowserItem actionItem)
                     App.ViewModel.OpenActionBar(actionItem);
+                break;
+
+            case Key.Right:
+                // In family mode Stage 1 with action bar not open, drill into family
+                if (!App.ViewModel.IsActionBarVisible
+                    && App.ViewModel.IsFamilyMode
+                    && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
+                    && App.ViewModel.HighlightedItem is BrowserItem rightFamilyItem
+                    && rightFamilyItem.TypeCount > 0)
+                {
+                    e.Handled = true;
+                    App.ViewModel.DrillIntoFamily(rightFamilyItem);
+                    break;
+                }
+                if (App.ViewModel.IsActionBarVisible)
+                {
+                    e.Handled = true;
+                    App.ViewModel.MoveActionFocus(+1);
+                }
+                break;
+
+            case Key.Left when App.ViewModel.IsActionBarVisible:
+                e.Handled = true;
+                App.ViewModel.MoveActionFocus(-1);
                 break;
 
             case Key.Down:
@@ -374,16 +754,6 @@ public partial class FinderPaneView : UserControl
                 e.Handled = true;
                 App.ViewModel.MoveHighlight(-1);
                 ScrollHighlightedIntoView();
-                break;
-
-            case Key.Left when App.ViewModel.IsActionBarVisible:
-                e.Handled = true;
-                App.ViewModel.MoveActionFocus(-1);
-                break;
-
-            case Key.Right when App.ViewModel.IsActionBarVisible:
-                e.Handled = true;
-                App.ViewModel.MoveActionFocus(+1);
                 break;
 
             case Key.F2 when App.ViewModel.IsActionBarVisible:
@@ -429,17 +799,16 @@ public partial class FinderPaneView : UserControl
         var item = App.ViewModel.HighlightedItem;
         if (item == null) return;
 
-        // Check which list contains the highlighted item and scroll it into view
         if (App.ViewModel.Favorites.Contains(item))
             FavoritesList.ScrollIntoView(item);
         else if (App.ViewModel.Results.Contains(item))
             ResultsList.ScrollIntoView(item);
     }
 
+    // ── Theme ──────────────────────────────────────────────────────
+
     private void ApplyTheme(bool isDark)
     {
-        ThemeService.SetDarkMode(isDark);
-
         string themeFile = isDark
             ? "Views/DarkTheme.xaml"
             : "Views/LightTheme.xaml";
@@ -450,15 +819,12 @@ public partial class FinderPaneView : UserControl
         Resources.MergedDictionaries.Clear();
         Resources.MergedDictionaries.Add(themeDictionary);
 
-        // Update the toggle button icon: show sun in dark mode, moon in light mode
-        ThemeToggleBtn.Content = isDark ? SunIcon : MoonIcon;
+        // Re-apply pill accent after theme change
+        if (App.ViewModel.HasModePill)
+            UpdateModePillAccent();
     }
 
-    private void ThemeToggle_Click(object sender, RoutedEventArgs e)
-    {
-        bool newIsDark = !ThemeService.IsDarkMode();
-        ApplyTheme(newIsDark);
-    }
+    // ── Event Handlers ─────────────────────────────────────────────
 
     private void OnItemSelectionRequested(BrowserItem item)
     {
@@ -466,7 +832,6 @@ public partial class FinderPaneView : UserControl
         {
             var uidoc = uiApp.ActiveUIDocument;
             if (uidoc == null) return;
-
             var elementId = new ElementId(item.ElementId);
             uidoc.Selection.SetElementIds(new List<ElementId> { elementId });
         });
@@ -493,7 +858,6 @@ public partial class FinderPaneView : UserControl
         {
             if (App.ViewModel.IsEditFamilyMode)
             {
-                // Edit Family Mode: open the family for editing
                 RevitBackgroundTask.Raise(uiApp =>
                 {
                     var uidoc = uiApp.ActiveUIDocument;
@@ -508,7 +872,6 @@ public partial class FinderPaneView : UserControl
             }
             else
             {
-                // Family Mode: activate the symbol and start placement
                 RevitBackgroundTask.Raise(uiApp =>
                 {
                     var uidoc = uiApp.ActiveUIDocument;
@@ -529,7 +892,6 @@ public partial class FinderPaneView : UserControl
                         }
                         catch (Autodesk.Revit.Exceptions.OperationCanceledException)
                         {
-                            // User pressed Escape to finish placing — normal
                         }
                     }
                 });
@@ -541,14 +903,10 @@ public partial class FinderPaneView : UserControl
             {
                 var uidoc = uiApp.ActiveUIDocument;
                 if (uidoc == null) return;
-
                 var doc = uidoc.Document;
                 var element = doc.GetElement(new ElementId(item.ElementId));
-
                 if (element is View view)
-                {
                     uidoc.RequestViewChange(view);
-                }
             });
         }
     }
@@ -566,9 +924,11 @@ public partial class FinderPaneView : UserControl
         }
     }
 
+    private bool _syncingSelections;
+
     private void List_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        // Mouse click on a list item: update highlight and trigger Revit selection
+        if (_syncingSelections) return;
         if (sender is ListBox listBox && listBox.SelectedItem is BrowserItem item)
         {
             App.ViewModel.HighlightedItem = item;
@@ -580,6 +940,21 @@ public partial class FinderPaneView : UserControl
     {
         if (App.ViewModel.HighlightedItem is BrowserItem item)
         {
+            // Two-stage family nav: double-click drills into family at Stage 1
+            if (App.ViewModel.IsFamilyMode
+                && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
+                && item.TypeCount > 0)
+            {
+                App.ViewModel.DrillIntoFamily(item);
+                return;
+            }
+
+            if (item.IsBackRow)
+            {
+                App.ViewModel.NavigateBackToFamilies();
+                return;
+            }
+
             App.ViewModel.RequestOpen(item);
         }
     }
@@ -618,7 +993,6 @@ public partial class FinderPaneView : UserControl
         switch (action.Kind)
         {
             case Models.QuickActionKind.Rename:
-                // Open inline rename instead of a dialog
                 App.ViewModel.OpenInlineRename(item);
                 break;
 
@@ -652,10 +1026,6 @@ public partial class FinderPaneView : UserControl
         }
     }
 
-    /// <summary>
-    /// Handles inline rename confirmation from the ViewModel.
-    /// For sheets: sheetNumber is non-null and contains the sheet number separately.
-    /// </summary>
     private void OnInlineRenameConfirmed(BrowserItem item, string newName, string? sheetNumber)
     {
         RevitBackgroundTask.Raise(uiApp =>
@@ -671,7 +1041,6 @@ public partial class FinderPaneView : UserControl
                 var trimmedNumber = sheetNumber.Trim();
                 var trimmedName = newName.Trim();
 
-                // Check for duplicate sheet number before committing
                 if (!string.IsNullOrEmpty(trimmedNumber) && trimmedNumber != sheet.SheetNumber)
                 {
                     var existing = new FilteredElementCollector(doc)
@@ -682,9 +1051,7 @@ public partial class FinderPaneView : UserControl
                     if (existing)
                     {
                         Dispatcher.Invoke(() =>
-                        {
-                            App.ViewModel.ShowInlineError($"Sheet number \"{trimmedNumber}\" already exists");
-                        });
+                            App.ViewModel.ShowInlineError($"Sheet number \"{trimmedNumber}\" already exists"));
                         return;
                     }
                 }
@@ -709,7 +1076,6 @@ public partial class FinderPaneView : UserControl
                 }
             }
 
-            // Force Revit to update the tab title for renamed views
             uidoc?.RefreshActiveView();
 
             Dispatcher.Invoke(() =>
@@ -721,10 +1087,6 @@ public partial class FinderPaneView : UserControl
         });
     }
 
-    /// <summary>
-    /// Smart delete: if deleting the active view, switch to an adjacent open view first.
-    /// If only one view is open, show an inline error instead.
-    /// </summary>
     private void HandleDelete(BrowserItem item)
     {
         RevitBackgroundTask.Raise(uiApp =>
@@ -737,23 +1099,16 @@ public partial class FinderPaneView : UserControl
             var element = doc.GetElement(elementId);
             if (element == null) return;
 
-            // Check if this is the active view
             if (element is View viewToDelete && uidoc.ActiveView.Id == elementId)
             {
-                // Get all open UIViews
                 var openViews = uidoc.GetOpenUIViews();
                 if (openViews.Count <= 1)
                 {
-                    // Cannot delete the only open view
                     Dispatcher.Invoke(() =>
-                    {
-                        App.ViewModel.ShowInlineError("Cannot delete the only open view");
-                    });
+                        App.ViewModel.ShowInlineError("Cannot delete the only open view"));
                     return;
                 }
 
-                // Find the UIView for the active view and close it.
-                // UIView.Close() is synchronous — Revit will activate the adjacent tab.
                 var activeUIView = openViews.FirstOrDefault(v => v.ViewId == elementId);
                 activeUIView?.Close();
             }
@@ -786,7 +1141,7 @@ public partial class FinderPaneView : UserControl
         });
     }
 
-    // ── Shortcut Edit Handlers ──────────────────────────────────────
+    // ── Shortcut Edit Handlers ─────────────────────────────────────
 
     private void OnShortcutEditConfirmed(BrowserItem item, string newShortcut)
     {
@@ -796,7 +1151,6 @@ public partial class FinderPaneView : UserControl
         var trimmed = newShortcut.Trim().ToUpperInvariant();
         if (string.IsNullOrEmpty(trimmed))
         {
-            // Treat empty input as remove
             HandleRemoveShortcut(item);
             return;
         }
@@ -850,15 +1204,14 @@ public partial class FinderPaneView : UserControl
 
     private void OnExcelExportConfirmed(BrowserItem item, string filename)
     {
-        // Sanitize filename and ensure .xlsx extension
         var sanitized = string.Join("_", filename.Split(System.IO.Path.GetInvalidFileNameChars()));
         if (string.IsNullOrWhiteSpace(sanitized))
             sanitized = "Schedule";
         if (!sanitized.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
             sanitized += ".xlsx";
 
-        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        var fullPath = System.IO.Path.Combine(documentsPath, sanitized);
+        var exportDir = SettingsService.Current.DefaultExportPath;
+        var fullPath = System.IO.Path.Combine(exportDir, sanitized);
 
         RevitBackgroundTask.Raise(uiApp =>
         {
@@ -886,7 +1239,6 @@ public partial class FinderPaneView : UserControl
 
                 int excelRow = 1;
 
-                // Write column headers from the Header section (last row has field names)
                 if (headerSection != null && headerSection.NumberOfRows > 0)
                 {
                     int lastHeaderRow = headerSection.NumberOfRows - 1;
@@ -898,7 +1250,6 @@ public partial class FinderPaneView : UserControl
                     excelRow = 2;
                 }
 
-                // Write ALL body rows as data (use ViewSchedule.GetCellText for reliability)
                 if (bodySection != null && bodySection.NumberOfRows > 0)
                 {
                     for (int r = 0; r < bodySection.NumberOfRows; r++)
@@ -922,15 +1273,10 @@ public partial class FinderPaneView : UserControl
             }
         });
 
-        // Return focus to search box
         SearchBox.Focus();
         Keyboard.Focus(SearchBox);
     }
 
-    /// <summary>
-    /// Re-collects items and refreshes the UI after a Revit mutation.
-    /// Must be called from the Revit thread (inside RevitBackgroundTask.Raise).
-    /// </summary>
     private void RefreshAfterMutation(UIApplication uiApp)
     {
         var doc = uiApp.ActiveUIDocument?.Document;
@@ -940,7 +1286,6 @@ public partial class FinderPaneView : UserControl
         Dispatcher.Invoke(() =>
         {
             App.ViewModel.LoadItems(items, favoriteIds);
-            // Ensure SearchBox has focus so ESC works to close pane
             SearchBox.Focus();
             Keyboard.Focus(SearchBox);
         });

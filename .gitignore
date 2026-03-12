@@ -17,3 +17,6 @@ Thumbs.db
 # Build artifacts
 *.dll
 *.pdb
+
+# Temp planning docs
+temp_directions/

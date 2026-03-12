@@ -98,6 +98,72 @@ public class App : IExternalApplication
         {
             resetButton.ToolTip = "Force-reset the Rauncher pane if it's invisible";
         }
+
+        var settingsData = new PushButtonData(
+            name: "RauncherSettings",
+            text: "Settings",
+            assemblyName: assemblyPath,
+            className: "w_finder.SettingsCommand");
+
+        var settingsButton = panel.AddItem(settingsData) as PushButton;
+        if (settingsButton != null)
+        {
+            settingsButton.LargeImage = CreateGearIcon(32);
+            settingsButton.Image = CreateGearIcon(16);
+            settingsButton.ToolTip = "Open Rauncher settings";
+        }
+    }
+
+    /// <summary>
+    /// Draws a simple gear icon at the given size using WPF drawing.
+    /// </summary>
+    private static BitmapSource CreateGearIcon(int size)
+    {
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+        {
+            double s = size;
+            double cx = s / 2;
+            double cy = s / 2;
+            double outerR = s * 0.42;
+            double innerR = s * 0.26;
+            double holeR = s * 0.14;
+            int teeth = 8;
+
+            var pen = new Pen(new SolidColorBrush(Color.FromRgb(80, 80, 80)), s < 20 ? 1.0 : 1.5);
+            pen.Freeze();
+            var fill = new SolidColorBrush(Color.FromArgb(40, 100, 160, 220));
+            fill.Freeze();
+
+            // Build gear path as a series of alternating inner/outer points
+            var segments = new PathSegmentCollection();
+            double step = Math.PI / teeth;
+            for (int i = 0; i < teeth * 2; i++)
+            {
+                double angle = i * step - Math.PI / 2;
+                double r = (i % 2 == 0) ? outerR : innerR;
+                var pt = new Point(cx + r * Math.Cos(angle), cy + r * Math.Sin(angle));
+                segments.Add(new LineSegment(pt, true));
+            }
+
+            double startAngle = -Math.PI / 2;
+            var startPt = new Point(cx + outerR * Math.Cos(startAngle), cy + outerR * Math.Sin(startAngle));
+            var figure = new PathFigure(startPt, segments, true);
+            var geometry = new PathGeometry(new[] { figure });
+
+            // Add center hole
+            var combined = new CombinedGeometry(
+                GeometryCombineMode.Exclude,
+                geometry,
+                new EllipseGeometry(new Point(cx, cy), holeR, holeR));
+
+            dc.DrawGeometry(fill, pen, combined);
+        }
+
+        var bitmap = new RenderTargetBitmap(size, size, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        bitmap.Freeze();
+        return bitmap;
     }
 
     /// <summary>
