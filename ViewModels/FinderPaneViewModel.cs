@@ -9,6 +9,27 @@ using QuickAction = w_finder.Models.QuickAction;
 namespace w_finder.ViewModels;
 
 /// <summary>
+/// Active mode enum — replaces the old prefix-based booleans.
+/// </summary>
+public enum ActiveMode
+{
+    Browser,
+    Place,
+    Edit,
+    Command,
+    Shebang
+}
+
+/// <summary>
+/// Two-stage family navigation state.
+/// </summary>
+public enum FamilyNavigationStage
+{
+    FamilyLevel,
+    TypeLevel
+}
+
+/// <summary>
 /// ViewModel for the finder pane. Holds the full item cache, search text, and filtered results.
 /// </summary>
 public class FinderPaneViewModel : INotifyPropertyChanged
@@ -34,6 +55,78 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         };
     }
 
+    // ── Mode Pill (consumed prefix) ─────────────────────────────────
+
+    private ActiveMode _activeMode = ActiveMode.Browser;
+    public ActiveMode ActiveMode
+    {
+        get => _activeMode;
+        set
+        {
+            if (_activeMode == value) return;
+            _activeMode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsBrowserMode));
+            OnPropertyChanged(nameof(IsPlaceFamilyMode));
+            OnPropertyChanged(nameof(IsEditFamilyMode));
+            OnPropertyChanged(nameof(IsFamilyMode));
+            OnPropertyChanged(nameof(IsCommandMode));
+            OnPropertyChanged(nameof(IsShebangMode));
+            OnPropertyChanged(nameof(ShowFavorites));
+            OnPropertyChanged(nameof(IsEmptyState));
+            OnPropertyChanged(nameof(ModePillText));
+            OnPropertyChanged(nameof(HasModePill));
+        }
+    }
+
+    /// <summary>
+    /// The display text for the mode pill chip inside the search box.
+    /// </summary>
+    public string? ModePillText => ActiveMode switch
+    {
+        ActiveMode.Place => "PLACE",
+        ActiveMode.Edit => "EDIT",
+        ActiveMode.Command => "CMD",
+        ActiveMode.Shebang => "SHEBANG",
+        _ => null
+    };
+
+    public bool HasModePill => ActiveMode != ActiveMode.Browser;
+
+    /// <summary>
+    /// Called by the view when the user types a prefix character.
+    /// The prefix is consumed — it does not appear in SearchText.
+    /// </summary>
+    public void ActivateMode(ActiveMode mode)
+    {
+        ActiveMode = mode;
+        // Clear search text since prefix is consumed
+        _searchText = string.Empty;
+        _cachedFamilyInput = null;
+        OnPropertyChanged(nameof(SearchText));
+        _debounceTimer.Stop();
+        RefreshResults();
+    }
+
+    /// <summary>
+    /// Called when the user backspaces on empty text while a pill is active.
+    /// Returns to Browser mode.
+    /// </summary>
+    public void DeactivateMode()
+    {
+        _familyNavigationStage = FamilyNavigationStage.FamilyLevel;
+        _selectedFamilyForDrilldown = null;
+        ActiveMode = ActiveMode.Browser;
+        _searchText = string.Empty;
+        _cachedFamilyInput = null;
+        OnPropertyChanged(nameof(SearchText));
+        OnPropertyChanged(nameof(FamilyNavigationStage));
+        _debounceTimer.Stop();
+        RefreshResults();
+    }
+
+    // ── Search Text ─────────────────────────────────────────────────
+
     private string _searchText = string.Empty;
     public string SearchText
     {
@@ -42,7 +135,31 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         {
             _searchText = value;
             _cachedFamilyInput = null;
+
+            // Check for -e flag in family mode to toggle Place/Edit
+            if (ActiveMode == ActiveMode.Place || ActiveMode == ActiveMode.Edit)
+            {
+                var parsed = ParseFamilyInput();
+                if (parsed.editMode && ActiveMode != ActiveMode.Edit)
+                {
+                    _activeMode = ActiveMode.Edit;
+                    OnPropertyChanged(nameof(ActiveMode));
+                    OnPropertyChanged(nameof(IsEditFamilyMode));
+                    OnPropertyChanged(nameof(IsPlaceFamilyMode));
+                    OnPropertyChanged(nameof(ModePillText));
+                }
+                else if (!parsed.editMode && ActiveMode == ActiveMode.Edit)
+                {
+                    _activeMode = ActiveMode.Place;
+                    OnPropertyChanged(nameof(ActiveMode));
+                    OnPropertyChanged(nameof(IsEditFamilyMode));
+                    OnPropertyChanged(nameof(IsPlaceFamilyMode));
+                    OnPropertyChanged(nameof(ModePillText));
+                }
+            }
+
             OnPropertyChanged();
+            OnPropertyChanged(nameof(IsEmptyState));
             _debounceTimer.Stop();
             _debounceTimer.Start();
         }
@@ -81,13 +198,79 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         set { _hasFavorites = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowFavorites)); }
     }
 
-    public bool IsFamilyMode => _searchText.StartsWith(">");
-    public bool IsCommandMode => _searchText.StartsWith(":");
-    public bool IsShebangMode => _searchText.StartsWith("!");
-    public bool IsEditFamilyMode => IsFamilyMode && ParseFamilyInput().editMode;
-    public bool IsPlaceFamilyMode => IsFamilyMode && !IsEditFamilyMode;
-    public bool IsBrowserMode => !IsFamilyMode && !IsCommandMode && !IsShebangMode;
-    public bool ShowFavorites => HasFavorites && !IsFamilyMode && !IsCommandMode && !IsShebangMode;
+    // ── Mode detection (backwards-compatible properties) ────────────
+
+    public bool IsFamilyMode => ActiveMode == ActiveMode.Place || ActiveMode == ActiveMode.Edit;
+    public bool IsCommandMode => ActiveMode == ActiveMode.Command;
+    public bool IsShebangMode => ActiveMode == ActiveMode.Shebang;
+    public bool IsEditFamilyMode => ActiveMode == ActiveMode.Edit;
+    public bool IsPlaceFamilyMode => ActiveMode == ActiveMode.Place;
+    public bool IsBrowserMode => ActiveMode == ActiveMode.Browser;
+
+    /// <summary>
+    /// When true, Family Mode only shows types that have placed instances in the project.
+    /// </summary>
+    public bool FilterPlacedTypes { get; set; }
+    public bool ShowFavorites => HasFavorites && IsBrowserMode;
+
+    // ── Empty state ─────────────────────────────────────────────────
+
+    public bool IsEmptyState => string.IsNullOrWhiteSpace(_searchText) && FamilyNavigationStage == FamilyNavigationStage.FamilyLevel;
+
+    /// <summary>
+    /// Available categories for Place mode empty state chips.
+    /// </summary>
+    public ObservableCollection<string> AvailableCategories { get; } = new();
+
+    // ── Two-Stage Family Navigation ─────────────────────────────────
+
+    private FamilyNavigationStage _familyNavigationStage = FamilyNavigationStage.FamilyLevel;
+    public FamilyNavigationStage FamilyNavigationStage
+    {
+        get => _familyNavigationStage;
+        set
+        {
+            _familyNavigationStage = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsEmptyState));
+        }
+    }
+
+    private string? _selectedFamilyForDrilldown;
+    public string? SelectedFamilyForDrilldown
+    {
+        get => _selectedFamilyForDrilldown;
+        set { _selectedFamilyForDrilldown = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// Drills down into a family, showing its types in Stage 2.
+    /// </summary>
+    public void DrillIntoFamily(BrowserItem familyItem)
+    {
+        if (familyItem.FamilyName == null) return;
+        SelectedFamilyForDrilldown = familyItem.FamilyName;
+        FamilyNavigationStage = FamilyNavigationStage.TypeLevel;
+        // Set search text to family name for context
+        _searchText = familyItem.FamilyName;
+        OnPropertyChanged(nameof(SearchText));
+        RefreshResults();
+    }
+
+    /// <summary>
+    /// Returns from Stage 2 (type level) back to Stage 1 (family level).
+    /// </summary>
+    public void NavigateBackToFamilies()
+    {
+        SelectedFamilyForDrilldown = null;
+        FamilyNavigationStage = FamilyNavigationStage.FamilyLevel;
+        _searchText = string.Empty;
+        _cachedFamilyInput = null;
+        OnPropertyChanged(nameof(SearchText));
+        RefreshResults();
+    }
+
+    // ── Family input parsing ────────────────────────────────────────
 
     /// <summary>
     /// Parses the Family Mode input, extracting optional -c category filter,
@@ -97,7 +280,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     {
         if (_cachedFamilyInput.HasValue) return _cachedFamilyInput.Value;
 
-        var raw = _searchText.Substring(1).TrimStart();
+        var raw = _searchText.TrimStart();
         string? categoryFilter = null;
         bool editMode = false;
 
@@ -105,7 +288,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         int eIndex = raw.IndexOf("-e", StringComparison.OrdinalIgnoreCase);
         if (eIndex >= 0)
         {
-            // Make sure it's a standalone flag (at end, or followed by space)
             int afterE = eIndex + 2;
             if (afterE >= raw.Length || raw[afterE] == ' ')
             {
@@ -138,25 +320,26 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     private string EffectiveSearchText => IsFamilyMode
         ? ParseFamilyInput().query
-        : IsCommandMode || IsShebangMode
-            ? _searchText.Substring(1).TrimStart()
-            : _searchText;
+        : _searchText;
 
     public ObservableCollection<BrowserItem> Results { get; } = new();
     public ObservableCollection<BrowserItem> Favorites { get; } = new();
+    public ObservableCollection<BrowserItem> RecentItems { get; } = new();
 
     public event Action<BrowserItem>? ItemSelectionRequested;
     public event Action<BrowserItem>? ItemOpenRequested;
-
-    /// <summary>
-    /// Fired when favorites change, so the view can persist via ExternalEvent.
-    /// </summary>
     public event Action? FavoritesChanged;
+    public event Action? FocusSearchRequested;
 
     /// <summary>
-    /// Fired after the pane is shown, so the view can focus the search box.
+    /// Fired when mode changes, so the view can animate the crossfade.
     /// </summary>
-    public event Action? FocusSearchRequested;
+    public event Action? ModeChanged;
+
+    /// <summary>
+    /// Fired when family navigation stage changes, so the view can animate.
+    /// </summary>
+    public event Action? FamilyStageChanged;
 
     public void RequestFocusSearch()
     {
@@ -200,19 +383,29 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         HighlightedItem = unified[newIndex];
     }
 
-    /// <summary>
-    /// Opens the currently highlighted item. Returns true if an item was opened.
-    /// </summary>
     public bool OpenHighlighted()
     {
         if (HighlightedItem == null) return false;
+
+        // Two-stage family navigation: drill into family on Enter at Stage 1
+        if (IsFamilyMode && FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
+            && HighlightedItem.TypeCount > 0)
+        {
+            DrillIntoFamily(HighlightedItem);
+            return true;
+        }
+
+        // Back row in Stage 2
+        if (HighlightedItem.IsBackRow)
+        {
+            NavigateBackToFamilies();
+            return true;
+        }
+
         ItemOpenRequested?.Invoke(HighlightedItem);
         return true;
     }
 
-    /// <summary>
-    /// Loads items and applies saved favorite state.
-    /// </summary>
     public void LoadCommands(List<BrowserItem> commands)
     {
         _commandItems = commands;
@@ -228,9 +421,19 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         _allItems = items;
         _favoriteIds = favoriteIds;
 
-        // Mark items that are favorites
         foreach (var item in _allItems)
             item.IsFavorite = _favoriteIds.Contains(item.ElementId);
+
+        // Populate available categories for Place mode empty state
+        AvailableCategories.Clear();
+        var cats = _allItems
+            .Where(i => i.Kind == BrowserItemKind.FamilyType)
+            .Select(i => i.Category)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(c => c)
+            .Take(12);
+        foreach (var cat in cats)
+            AvailableCategories.Add(cat);
 
         StatusText = $"{_allItems.Count} items loaded.";
         RefreshFavorites();
@@ -252,8 +455,48 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     public HashSet<long> GetFavoriteIds() => _favoriteIds;
 
-    // Maximum items rendered at once — keeps the list fast regardless of project size.
     private const int MaxResults = 200;
+
+    /// <summary>
+    /// Assigns GroupKey to each item based on its Kind.
+    /// </summary>
+    private static string GetGroupKey(BrowserItem item)
+    {
+        return item.Kind switch
+        {
+            BrowserItemKind.View => "VIEWS",
+            BrowserItemKind.Sheet => "SHEETS",
+            BrowserItemKind.Schedule => "SCHEDULES",
+            BrowserItemKind.Family => "FAMILIES",
+            BrowserItemKind.FamilyType => item.Category.ToUpperInvariant(),
+            BrowserItemKind.Group => "GROUPS",
+            BrowserItemKind.RevitLink => "LINKS",
+            BrowserItemKind.Assembly => "ASSEMBLIES",
+            BrowserItemKind.Command => item.RibbonTab?.ToUpperInvariant() ?? "OTHER",
+            BrowserItemKind.Shebang => "COMMANDS",
+            _ => "OTHER"
+        };
+    }
+
+    /// <summary>
+    /// Group sort order for Browser mode sections.
+    /// </summary>
+    private static int GetBrowserGroupOrder(string groupKey)
+    {
+        return groupKey switch
+        {
+            "RECENT" => 0,
+            "FAVORITES" => 1,
+            "VIEWS" => 2,
+            "SHEETS" => 3,
+            "SCHEDULES" => 4,
+            "FAMILIES" => 5,
+            "GROUPS" => 6,
+            "LINKS" => 7,
+            "ASSEMBLIES" => 8,
+            _ => 9
+        };
+    }
 
     public void RefreshResults()
     {
@@ -262,81 +505,80 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
         if (IsShebangMode)
         {
-            var query = _searchText.Substring(1).TrimStart();
+            var query = _searchText.TrimStart();
             var filtered = FuzzyMatcher.Match(_shebangItems, query);
 
             foreach (var item in filtered)
+            {
+                item.GroupKey = "COMMANDS";
                 Results.Add(item);
+            }
 
             StatusText = string.IsNullOrWhiteSpace(query)
-                ? $"Shebang Mode \u2014 {_shebangItems.Count} commands"
-                : $"Shebang Mode \u2014 {filtered.Count} of {_shebangItems.Count} commands";
+                ? $"{_shebangItems.Count} commands"
+                : $"{filtered.Count} of {_shebangItems.Count} commands";
             HighlightedItem = Results.Count > 0 ? Results[0] : null;
         }
         else if (IsCommandMode)
         {
-            var query = _searchText.Substring(1).TrimStart();
+            var query = _searchText.TrimStart();
             var filtered = FuzzyMatcher.Match(_commandItems, query);
             int totalMatched = filtered.Count;
 
-            foreach (var item in filtered.Take(MaxResults))
+            // Group by ribbon tab
+            var grouped = filtered
+                .Take(MaxResults)
+                .OrderBy(i => i.RibbonTab ?? "Other")
+                .ToList();
+
+            foreach (var item in grouped)
+            {
+                item.GroupKey = item.RibbonTab?.ToUpperInvariant() ?? "OTHER";
                 Results.Add(item);
+            }
 
             StatusText = string.IsNullOrWhiteSpace(query)
-                ? $"Command Mode \u2014 {_commandItems.Count} commands"
-                : $"Command Mode \u2014 {Math.Min(totalMatched, MaxResults)} of {_commandItems.Count} commands";
+                ? $"{_commandItems.Count} commands"
+                : $"{Math.Min(totalMatched, MaxResults)} of {_commandItems.Count} commands";
             HighlightedItem = Results.Count > 0 ? Results[0] : null;
         }
         else if (IsFamilyMode)
         {
-            var (query, categoryFilter, editMode) = ParseFamilyInput();
-
-            var source = _allItems.Where(i => i.Kind == BrowserItemKind.FamilyType);
-
-            // Apply -c category filter (substring match, case-insensitive)
-            if (!string.IsNullOrEmpty(categoryFilter))
-                source = source.Where(i =>
-                    i.Category.Contains(categoryFilter, StringComparison.OrdinalIgnoreCase));
-
-            var sourceList = source.ToList();
-            var filtered = FuzzyMatcher.Match(sourceList, query);
-            int totalMatched = filtered.Count;
-
-            // Sort by category for grouped display, then cap
-            var sorted = filtered
-                .OrderBy(i => i.Category, StringComparer.OrdinalIgnoreCase)
-                .Take(MaxResults);
-
-            foreach (var item in sorted)
-                Results.Add(item);
-
-            var statusParts = new List<string> { editMode ? "Edit Family Mode" : "Family Mode" };
-            if (!string.IsNullOrEmpty(categoryFilter))
-                statusParts.Add($"-c {categoryFilter}");
-            string prefix = string.Join(" ", statusParts);
-
-            StatusText = string.IsNullOrWhiteSpace(query)
-                ? $"{prefix} \u2014 {totalMatched} types"
-                : $"{prefix} \u2014 {Math.Min(totalMatched, MaxResults)} of {sourceList.Count} types";
-            HighlightedItem = Results.Count > 0 ? Results[0] : null;
+            RefreshFamilyResults();
         }
         else
         {
-            var filtered = FuzzyMatcher.Match(_allItems, _searchText);
-            int totalMatched = filtered.Count;
-
-            foreach (var item in filtered.Take(MaxResults))
-                Results.Add(item);
-
-            if (!string.IsNullOrWhiteSpace(_searchText))
+            // Browser mode
+            if (string.IsNullOrWhiteSpace(_searchText))
             {
-                StatusText = $"{Math.Min(totalMatched, MaxResults)} of {_allItems.Count} items.";
-                HighlightedItem = Results.Count > 0 ? Results[0] : null;
+                // Empty search: show recent items instead of full list
+                RefreshRecentItems();
+                foreach (var item in RecentItems)
+                    Results.Add(item);
+
+                StatusText = RecentItems.Count > 0
+                    ? $"{_allItems.Count} items · {RecentItems.Count} recent"
+                    : $"{_allItems.Count} items loaded.";
+                HighlightedItem = null;
             }
             else
             {
-                StatusText = $"{_allItems.Count} items loaded.";
-                HighlightedItem = null;
+                var filtered = FuzzyMatcher.Match(_allItems, _searchText);
+                int totalMatched = filtered.Count;
+
+                // Group by item kind and sort groups
+                var grouped = filtered
+                    .Take(MaxResults)
+                    .Select(i => { i.GroupKey = GetGroupKey(i); return i; })
+                    .OrderBy(i => GetBrowserGroupOrder(i.GroupKey))
+                    .ThenBy(i => i.GroupKey)
+                    .ToList();
+
+                foreach (var item in grouped)
+                    Results.Add(item);
+
+                StatusText = BuildBrowserStatusText(grouped, totalMatched);
+                HighlightedItem = Results.Count > 0 ? Results[0] : null;
             }
         }
 
@@ -347,6 +589,105 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsShebangMode));
         OnPropertyChanged(nameof(IsBrowserMode));
         OnPropertyChanged(nameof(ShowFavorites));
+        OnPropertyChanged(nameof(IsEmptyState));
+    }
+
+    private void RefreshFamilyResults()
+    {
+        var (query, categoryFilter, editMode) = ParseFamilyInput();
+
+        var source = _allItems.Where(i => i.Kind == BrowserItemKind.FamilyType);
+
+        if (FilterPlacedTypes)
+            source = source.Where(i => i.IsPlacedInProject);
+
+        if (!string.IsNullOrEmpty(categoryFilter))
+            source = source.Where(i =>
+                i.Category.Contains(categoryFilter, StringComparison.OrdinalIgnoreCase));
+
+        var sourceList = source.ToList();
+
+        if (FamilyNavigationStage == FamilyNavigationStage.TypeLevel && SelectedFamilyForDrilldown != null)
+        {
+            // Stage 2: show types within the selected family
+            var types = sourceList
+                .Where(i => i.FamilyName == SelectedFamilyForDrilldown)
+                .ToList();
+
+            // Add back row
+            var backRow = new BrowserItem
+            {
+                Name = $"\u2190 {SelectedFamilyForDrilldown}",
+                Category = "",
+                ElementId = -1,
+                Kind = BrowserItemKind.FamilyType,
+                IsBackRow = true,
+                GroupKey = SelectedFamilyForDrilldown.ToUpperInvariant()
+            };
+            Results.Add(backRow);
+
+            foreach (var item in types)
+            {
+                item.GroupKey = SelectedFamilyForDrilldown.ToUpperInvariant();
+                Results.Add(item);
+            }
+
+            StatusText = $"{types.Count} types in {SelectedFamilyForDrilldown}";
+            HighlightedItem = Results.Count > 1 ? Results[1] : (Results.Count > 0 ? Results[0] : null);
+        }
+        else
+        {
+            // Stage 1: show families (grouped by category)
+            var filtered = FuzzyMatcher.Match(sourceList, query);
+            int totalMatched = filtered.Count;
+
+            // Group by family name, create summary rows
+            var familyGroups = filtered
+                .GroupBy(i => new { i.FamilyName, i.Category })
+                .OrderBy(g => g.Key.Category, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(g => g.Key.FamilyName, StringComparer.OrdinalIgnoreCase)
+                .Take(MaxResults);
+
+            foreach (var group in familyGroups)
+            {
+                var first = group.First();
+                var summaryItem = new BrowserItem
+                {
+                    Name = group.Key.FamilyName ?? first.Name,
+                    Category = group.Key.Category ?? "Family",
+                    ElementId = first.ElementId,
+                    Kind = BrowserItemKind.FamilyType,
+                    FamilyName = group.Key.FamilyName,
+                    TypeCount = group.Count(),
+                    GroupKey = (group.Key.Category ?? "FAMILY").ToUpperInvariant()
+                };
+                Results.Add(summaryItem);
+            }
+
+            var statusParts = new List<string> { editMode ? "Edit Mode" : "Place Mode" };
+            if (!string.IsNullOrEmpty(categoryFilter))
+                statusParts.Add($"-c {categoryFilter}");
+            string prefix = string.Join(" ", statusParts);
+
+            StatusText = string.IsNullOrWhiteSpace(query)
+                ? $"{prefix} \u2014 {Results.Count} families"
+                : $"{prefix} \u2014 {Results.Count} families ({totalMatched} types)";
+            HighlightedItem = Results.Count > 0 ? Results[0] : null;
+        }
+    }
+
+    /// <summary>
+    /// Applies a category filter chip from the Place mode empty state.
+    /// </summary>
+    public void ApplyCategoryFilter(string category)
+    {
+        if (ActiveMode != ActiveMode.Place && ActiveMode != ActiveMode.Edit)
+            ActivateMode(ActiveMode.Place);
+
+        _searchText = $"-c {category} ";
+        _cachedFamilyInput = null;
+        OnPropertyChanged(nameof(SearchText));
+        RefreshResults();
     }
 
     private void RefreshFavorites()
@@ -356,6 +697,68 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         foreach (var item in _allItems.Where(i => i.IsFavorite))
             Favorites.Add(item);
         HasFavorites = Favorites.Count > 0;
+    }
+
+    /// <summary>
+    /// Populates the RecentItems collection from the RecentItemsStore,
+    /// resolving stored element IDs back to full BrowserItem objects.
+    /// </summary>
+    private void RefreshRecentItems()
+    {
+        RecentItems.Clear();
+        var recents = RecentItemsStore.GetRecents("Browser", 10);
+        var itemLookup = new Dictionary<long, BrowserItem>();
+        foreach (var i in _allItems)
+            itemLookup.TryAdd(i.ElementId, i);
+
+        foreach (var entry in recents)
+        {
+            if (itemLookup.TryGetValue(entry.ElementId, out var item))
+            {
+                item.GroupKey = "RECENT";
+                RecentItems.Add(item);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds a contextual status string like "12 views · 3 sheets matching 'ctrl'"
+    /// </summary>
+    private string BuildBrowserStatusText(List<BrowserItem> shown, int totalMatched)
+    {
+        // Count by kind
+        var counts = new Dictionary<string, int>();
+        foreach (var item in shown)
+        {
+            var label = item.Kind switch
+            {
+                BrowserItemKind.View => "views",
+                BrowserItemKind.Sheet => "sheets",
+                BrowserItemKind.Schedule => "schedules",
+                BrowserItemKind.FamilyType => "families",
+                BrowserItemKind.Group => "groups",
+                BrowserItemKind.RevitLink => "links",
+                BrowserItemKind.Assembly => "assemblies",
+                _ => null
+            };
+            if (label != null)
+            {
+                counts.TryGetValue(label, out int c);
+                counts[label] = c + 1;
+            }
+        }
+
+        if (counts.Count == 0)
+            return "No results — try a different spelling";
+
+        // Build parts like "12 views · 3 sheets"
+        var parts = counts.Select(kv => $"{kv.Value} {kv.Key}");
+        var summary = string.Join(" · ", parts);
+
+        if (totalMatched > shown.Count)
+            summary += $" (showing {shown.Count} of {totalMatched})";
+
+        return summary;
     }
 
     private void OnItemSelected()
@@ -390,10 +793,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     }
 
     public event Action<BrowserItem, QuickAction>? QuickActionRequested;
-
-    /// <summary>
-    /// Fired after a Revit mutation so the view can re-collect items.
-    /// </summary>
     public event Action? RefreshRequested;
 
     public void RequestRefresh() => RefreshRequested?.Invoke();
@@ -417,7 +816,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         FocusedAction = null;
         ActiveActions.Clear();
         ClearInlineError();
-        // Don't clear ActionBarItem here — inline rename needs it
     }
 
     public void MoveActionFocus(int direction)
@@ -433,13 +831,10 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         if (ActionBarItem == null || FocusedAction == null) return false;
         var item = ActionBarItem;
         var action = FocusedAction;
-        // Close the pill bar first (but keep ActionBarItem for rename)
         IsActionBarVisible = false;
         FocusedAction = null;
         ActiveActions.Clear();
-        // Fire the action — for Rename this opens inline rename, so ActionBarItem stays
         QuickActionRequested?.Invoke(item, action);
-        // Clear ActionBarItem only if rename didn't grab it
         if (!IsInlineRenameVisible)
             ActionBarItem = null;
         return true;
@@ -461,7 +856,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         set { _renameText = value; OnPropertyChanged(); }
     }
 
-    /// <summary>For sheets: the sheet number field.</summary>
     private string _renameSheetNumber = string.Empty;
     public string RenameSheetNumber
     {
@@ -483,10 +877,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         set { _renameItem = value; OnPropertyChanged(); }
     }
 
-    /// <summary>Fired so the view can focus the rename textbox.</summary>
     public event Action? FocusRenameRequested;
-
-    /// <summary>Fired when the user confirms the inline rename.</summary>
     public event Action<BrowserItem, string, string?>? InlineRenameConfirmed;
 
     public void OpenInlineRename(BrowserItem item)
@@ -497,7 +888,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
         if (item.Kind == BrowserItemKind.Sheet)
         {
-            // Sheet names are "Number - Name". Split them.
             IsSheetRename = true;
             var dashIndex = item.Name.IndexOf(" - ");
             if (dashIndex >= 0)
@@ -549,20 +939,15 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         IsSheetRename = false;
     }
 
-    // ── Shortcut Editing (reuses inline rename popup) ───────────
+    // ── Shortcut Editing ──────────────────────────────────────────
 
     private bool _isShortcutEditMode;
-    /// <summary>
-    /// When true, the inline rename popup is being used to edit a keyboard shortcut
-    /// instead of renaming an element.
-    /// </summary>
     public bool IsShortcutEditMode
     {
         get => _isShortcutEditMode;
         set { _isShortcutEditMode = value; OnPropertyChanged(); }
     }
 
-    /// <summary>Fired when the user confirms a shortcut edit.</summary>
     public event Action<BrowserItem, string>? ShortcutEditConfirmed;
 
     public void OpenShortcutEdit(BrowserItem item)
@@ -585,7 +970,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         CloseInlineRename();
     }
 
-    // ── Excel Export (reuses inline rename popup) ─────────────────
+    // ── Excel Export ──────────────────────────────────────────────
 
     private bool _isExcelExportMode;
     public bool IsExcelExportMode
@@ -594,7 +979,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         set { _isExcelExportMode = value; OnPropertyChanged(); }
     }
 
-    /// <summary>Fired when the user confirms the export filename.</summary>
     public event Action<BrowserItem, string>? ExcelExportConfirmed;
 
     public void OpenExcelExportInput(BrowserItem item)
@@ -617,7 +1001,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         CloseInlineRename();
     }
 
-    // ── Inline Message (Error / Success) ─────────────────────────
+    // ── Inline Message (Error / Success) ──────────────────────────
 
     private string? _inlineError;
     public string? InlineError

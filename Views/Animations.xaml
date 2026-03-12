@@ -1,0 +1,50 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Animation timing tokens — adjust globally here -->
+    <Duration x:Key="AnimFast">0:0:0.08</Duration>
+    <Duration x:Key="AnimNormal">0:0:0.11</Duration>
+    <Duration x:Key="AnimSlow">0:0:0.15</Duration>
+
+    <!-- Easing functions -->
+    <QuadraticEase x:Key="EaseOut" EasingMode="EaseOut"/>
+
+    <!-- Mode pill fade in: 80ms linear -->
+    <Storyboard x:Key="PillFadeIn">
+        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                         From="0" To="1"
+                         Duration="{StaticResource AnimFast}"/>
+    </Storyboard>
+
+    <!-- Mode pill fade out: 60ms linear -->
+    <Storyboard x:Key="PillFadeOut">
+        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                         From="1" To="0"
+                         Duration="0:0:0.06"/>
+    </Storyboard>
+
+    <!-- Results crossfade out (mode switch / stage transition): 50ms ease-out -->
+    <Storyboard x:Key="ResultsFadeOut">
+        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                         From="1" To="0"
+                         Duration="0:0:0.05"
+                         EasingFunction="{StaticResource EaseOut}"/>
+    </Storyboard>
+
+    <!-- Results crossfade in: 60ms ease-out -->
+    <Storyboard x:Key="ResultsFadeIn">
+        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                         From="0" To="1"
+                         Duration="0:0:0.06"
+                         EasingFunction="{StaticResource EaseOut}"/>
+    </Storyboard>
+
+    <!-- Empty state appear: 90ms ease-out -->
+    <Storyboard x:Key="EmptyStateFadeIn">
+        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                         From="0" To="1"
+                         Duration="{StaticResource AnimFast}"
+                         EasingFunction="{StaticResource EaseOut}"/>
+    </Storyboard>
+
+</ResourceDictionary>

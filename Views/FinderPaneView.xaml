@@ -3,14 +3,21 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:w_finder.Views"
              Background="{DynamicResource PaneBackground}"
-             FontFamily="Segoe UI">
+             FontFamily="Segoe UI"
+             TextOptions.TextRenderingMode="ClearType"
+             TextOptions.TextFormattingMode="Display">
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
         <local:EqualityConverter x:Key="EqualityConverter"/>
         <local:NullToCollapsedConverter x:Key="NullToCollapsedConverter"/>
+        <local:BoolToOpacityConverter x:Key="BoolToOpacity"/>
 
-        <!-- Flat ListBox style (no border, themed background) -->
+        <!-- Animation timing tokens -->
+        <Duration x:Key="AnimFast">0:0:0.08</Duration>
+        <Duration x:Key="AnimNormal">0:0:0.11</Duration>
+
+        <!-- Flat ListBox style -->
         <Style x:Key="ThemedListBox" TargetType="ListBox">
             <Setter Property="Background" Value="{DynamicResource ListBackground}"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -18,7 +25,7 @@
             <Setter Property="Padding" Value="0"/>
         </Style>
 
-        <!-- ListBoxItem with hover/selected states -->
+        <!-- ListBoxItem with hover/selected states + disclosure chevron reveal -->
         <Style x:Key="ThemedListBoxItem" TargetType="ListBoxItem">
             <Setter Property="Padding" Value="8,6"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -63,7 +70,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border Background="{TemplateBinding Background}"
-                                CornerRadius="4"
+                                CornerRadius="2"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center">
                             <ContentPresenter HorizontalAlignment="Center"
@@ -84,76 +91,27 @@
             </Style.Triggers>
         </Style>
 
-        <!-- Search box style -->
-        <Style x:Key="SearchBoxStyle" TargetType="TextBox">
-            <Setter Property="Background" Value="{DynamicResource SearchBoxBackground}"/>
-            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
-            <Setter Property="CaretBrush" Value="{DynamicResource PrimaryText}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource SearchBoxBorder}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="8,6"/>
-            <Setter Property="FontSize" Value="13"/>
+        <!-- Minimal pill scrollbar -->
+        <Style x:Key="PillScrollThumb" TargetType="Thumb">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="TextBox">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
+                    <ControlTemplate TargetType="Thumb">
+                        <Border x:Name="ThumbBorder"
+                                Background="{DynamicResource ScrollThumb}"
                                 CornerRadius="3"
-                                x:Name="border">
-                            <Grid>
-                                <!-- Placeholder text -->
-                                <TextBlock x:Name="Placeholder"
-                                           Text="Search views, sheets, families..."
-                                           Foreground="{DynamicResource SearchBoxPlaceholder}"
-                                           Margin="10,0,0,0"
-                                           VerticalAlignment="Center"
-                                           FontSize="13"
-                                           Visibility="Collapsed"/>
-                                <ScrollViewer x:Name="PART_ContentHost"
-                                              Margin="2,0"
-                                              VerticalAlignment="Center"/>
-                            </Grid>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsFocused" Value="True">
-                                <Setter TargetName="border" Property="BorderBrush"
-                                        Value="{DynamicResource SearchBoxBorderFocus}"/>
-                            </Trigger>
-                            <Trigger Property="Text" Value="">
-                                <Setter TargetName="Placeholder" Property="Visibility"
-                                        Value="Visible"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- Theme toggle button -->
-        <Style x:Key="ThemeToggleButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="Width" Value="30"/>
-            <Setter Property="Height" Value="30"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Foreground" Value="{DynamicResource SecondaryText}"/>
-            <Setter Property="ToolTip" Value="Toggle light/dark mode"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                CornerRadius="3"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
-                        </Border>
+                                Opacity="0.6"/>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="{DynamicResource ItemHoverBackground}"/>
+                                <Setter TargetName="ThumbBorder" Property="Background"
+                                        Value="{DynamicResource ScrollThumbHover}"/>
+                                <Setter TargetName="ThumbBorder" Property="Opacity" Value="1"/>
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background"
+                                        Value="{DynamicResource ScrollThumbHover}"/>
+                                <Setter TargetName="ThumbBorder" Property="Opacity" Value="1"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -161,7 +119,25 @@
             </Setter>
         </Style>
 
-        <!-- Minimal Expander with thin chevron arrow -->
+        <Style TargetType="ScrollBar">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="MinWidth" Value="6"/>
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource PillScrollThumb}"/>
+                            </Track.Thumb>
+                        </Track>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Minimal Expander -->
         <Style x:Key="MinimalExpander" TargetType="Expander">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -204,6 +180,13 @@
                                                     </Setter.Value>
                                                 </Setter>
                                             </Trigger>
+                                            <Trigger Property="IsChecked" Value="False">
+                                                <Setter TargetName="Arrow" Property="RenderTransform">
+                                                    <Setter.Value>
+                                                        <RotateTransform Angle="0"/>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
                                 </ToggleButton.Template>
@@ -223,53 +206,6 @@
             </Setter>
         </Style>
 
-        <!-- Minimal pill scrollbar: thin thumb, no arrows, no track chrome -->
-        <Style x:Key="PillScrollThumb" TargetType="Thumb">
-            <Setter Property="OverridesDefaultStyle" Value="True"/>
-            <Setter Property="IsTabStop" Value="False"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Thumb">
-                        <Border x:Name="ThumbBorder"
-                                Background="{DynamicResource ScrollThumb}"
-                                CornerRadius="3"
-                                Opacity="0.6"/>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background"
-                                        Value="{DynamicResource ScrollThumbHover}"/>
-                                <Setter TargetName="ThumbBorder" Property="Opacity" Value="1"/>
-                            </Trigger>
-                            <Trigger Property="IsDragging" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background"
-                                        Value="{DynamicResource ScrollThumbHover}"/>
-                                <Setter TargetName="ThumbBorder" Property="Opacity" Value="1"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style TargetType="ScrollBar">
-            <Setter Property="OverridesDefaultStyle" Value="True"/>
-            <Setter Property="Width" Value="6"/>
-            <Setter Property="MinWidth" Value="6"/>
-            <Setter Property="Margin" Value="2,0,0,0"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ScrollBar">
-                        <Track x:Name="PART_Track"
-                               IsDirectionReversed="True">
-                            <Track.Thumb>
-                                <Thumb Style="{StaticResource PillScrollThumb}"/>
-                            </Track.Thumb>
-                        </Track>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
     </UserControl.Resources>
 
     <Grid Margin="8">
@@ -277,92 +213,82 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Search row: search box + theme toggle -->
-        <DockPanel Grid.Row="0">
-            <Button x:Name="ThemeToggleBtn"
-                    DockPanel.Dock="Right"
-                    Style="{StaticResource ThemeToggleButton}"
-                    Content="&#x263C;"
-                    Margin="4,0,0,0"
-                    Click="ThemeToggle_Click"/>
-            <TextBox x:Name="SearchBox"
-                     Style="{StaticResource SearchBoxStyle}"
-                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                     PreviewKeyDown="SearchBox_PreviewKeyDown"/>
-        </DockPanel>
+        <!-- Row 0: Search box with mode pill -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource SearchBoxBackground}"
+                BorderBrush="{DynamicResource SearchBoxBorder}"
+                BorderThickness="1"
+                CornerRadius="2">
+            <DockPanel>
+                <!-- Mode Pill (inside search box, left side) -->
+                <Border x:Name="ModePillBorder"
+                        DockPanel.Dock="Left"
+                        Visibility="{Binding HasModePill, Converter={StaticResource BoolToVisibility}}"
+                        Margin="4,3,0,3"
+                        Padding="3,1,5,1"
+                        CornerRadius="2"
+                        VerticalAlignment="Center">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="2,1,1,1"/>
+                            <Setter Property="BorderBrush" Value="{DynamicResource PillBorder}"/>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock Text="{Binding ModePillText}"
+                               FontSize="10"
+                               FontFamily="Segoe UI"
+                               Foreground="{DynamicResource PillText}"
+                               VerticalAlignment="Center"/>
+                </Border>
+                <!-- Search TextBox -->
+                <TextBox x:Name="SearchBox"
+                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Foreground="{DynamicResource PrimaryText}"
+                         CaretBrush="{DynamicResource PrimaryText}"
+                         Padding="6,6"
+                         FontSize="13"
+                         VerticalAlignment="Center"
+                         PreviewKeyDown="SearchBox_PreviewKeyDown"/>
+            </DockPanel>
+        </Border>
 
-        <!-- Status bar -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="4,6,4,2">
-            <Border Background="#3C6EB4"
-                    CornerRadius="3"
-                    Padding="6,1"
-                    Margin="0,0,6,0"
-                    Visibility="{Binding IsBrowserMode, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="BROWSER"
-                           FontSize="9"
-                           FontWeight="Bold"
-                           Foreground="White"/>
-            </Border>
-            <Border Background="{DynamicResource SearchBoxBorderFocus}"
-                    CornerRadius="3"
-                    Padding="6,1"
-                    Margin="0,0,6,0"
-                    Visibility="{Binding IsPlaceFamilyMode, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="PLACE"
-                           FontSize="9"
-                           FontWeight="Bold"
-                           Foreground="White"/>
-            </Border>
-            <Border Background="#8B5CF6"
-                    CornerRadius="3"
-                    Padding="6,1"
-                    Margin="0,0,6,0"
-                    Visibility="{Binding IsEditFamilyMode, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="EDIT"
-                           FontSize="9"
-                           FontWeight="Bold"
-                           Foreground="White"/>
-            </Border>
-            <Border Background="#D08030"
-                    CornerRadius="3"
-                    Padding="6,1"
-                    Margin="0,0,6,0"
-                    Visibility="{Binding IsCommandMode, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="CMD"
-                           FontSize="9"
-                           FontWeight="Bold"
-                           Foreground="White"/>
-            </Border>
-            <Border Background="#22C55E"
-                    CornerRadius="3"
-                    Padding="6,1"
-                    Margin="0,0,6,0"
-                    Visibility="{Binding IsShebangMode, Converter={StaticResource BoolToVisibility}}">
-                <TextBlock Text="SHEBANG"
-                           FontSize="9"
-                           FontWeight="Bold"
-                           Foreground="White"/>
-            </Border>
-            <TextBlock FontSize="11"
-                       Foreground="{DynamicResource InactiveText}"
-                       Text="{Binding StatusText}"/>
+        <!-- Row 1: Status text (minimal) -->
+        <TextBlock Grid.Row="1"
+                   FontSize="10"
+                   Foreground="{DynamicResource MutedText}"
+                   Text="{Binding StatusText}"
+                   Margin="4,4,4,2"/>
+
+        <!-- Row 2: Browser mode hints (above favorites, close to search bar) -->
+        <StackPanel x:Name="BrowserHints" Grid.Row="2" Margin="4,4,4,0"
+                    Visibility="Collapsed">
+            <TextBlock FontSize="11" Foreground="{DynamicResource HintText}" Margin="0,2">
+                <Run Text="Type  "/><Run Text=">" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text="  to place families"/>
+            </TextBlock>
+            <TextBlock FontSize="11" Foreground="{DynamicResource HintText}" Margin="0,2">
+                <Run Text="Type  "/><Run Text=":" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text="  to run commands"/>
+            </TextBlock>
         </StackPanel>
 
-        <!-- Favorites section -->
-        <Border Grid.Row="2"
+        <!-- Row 3: Favorites section -->
+        <Border Grid.Row="3"
                 Margin="0,4"
                 Background="{DynamicResource FavoritesBackground}"
-                CornerRadius="3"
+                CornerRadius="2"
                 Visibility="{Binding ShowFavorites, Converter={StaticResource BoolToVisibility}}">
             <Expander IsExpanded="True" Margin="4" Style="{StaticResource MinimalExpander}">
                 <Expander.Header>
                     <TextBlock Text="FAVORITES"
                                FontSize="10"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource ExpanderHeaderText}"/>
+                               Foreground="{DynamicResource SectionHeaderText}"/>
                 </Expander.Header>
                 <ListBox x:Name="FavoritesList"
                          Style="{StaticResource ThemedListBox}"
@@ -382,23 +308,15 @@
                                         Style="{StaticResource StarButton}"
                                         Click="ToggleFavorite_Click"
                                         Tag="{Binding}"/>
-                                <TextBlock Text="{Binding ShortcutKeys}"
-                                           DockPanel.Dock="Right"
-                                           FontSize="10"
-                                           FontFamily="Consolas"
-                                           Foreground="{DynamicResource SecondaryText}"
-                                           VerticalAlignment="Center"
-                                           Margin="4,0"
-                                           Opacity="0.7"
-                                           Visibility="{Binding ShortcutKeys, Converter={StaticResource NullToCollapsedConverter}}"/>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="{Binding Name}"
                                                FontSize="12"
+                                               FontWeight="Medium"
                                                Foreground="{DynamicResource PrimaryText}"
                                                TextTrimming="CharacterEllipsis"/>
                                     <TextBlock Text="{Binding Category}"
-                                               FontSize="10"
-                                               Foreground="{DynamicResource SecondaryText}"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource MutedText}"
                                                Margin="0,1,0,0"/>
                                 </StackPanel>
                             </DockPanel>
@@ -408,9 +326,45 @@
             </Expander>
         </Border>
 
-        <!-- Results list -->
+        <!-- Row 4: Empty states -->
+        <Border x:Name="EmptyStatePanel"
+                Grid.Row="4"
+                Visibility="Collapsed"
+                Margin="4,4">
+
+            <StackPanel>
+                <!-- Browser empty state (kept for compatibility, hints moved to Row 2) -->
+                <StackPanel x:Name="BrowserEmptyState" Visibility="Collapsed"/>
+
+                <!-- Place/Edit empty state -->
+                <StackPanel x:Name="PlaceEmptyState" Visibility="Collapsed">
+                    <!-- Category chips -->
+                    <TextBlock Text="CATEGORIES"
+                               FontSize="10"
+                               Foreground="{DynamicResource SectionHeaderText}"
+                               Margin="0,8,0,4"/>
+                    <WrapPanel x:Name="CategoryChipsPanel" Margin="0,2,0,0">
+                        <!-- Populated from code-behind -->
+                    </WrapPanel>
+                </StackPanel>
+
+                <!-- Command empty state -->
+                <StackPanel x:Name="CommandEmptyState" Visibility="Collapsed">
+                    <Border BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SeparatorBrush}"
+                            Margin="0,8,0,8" Padding="0,0,0,4"/>
+                    <TextBlock FontSize="11" Foreground="{DynamicResource HintText}" Margin="0,2">
+                        <Run Text="Type to search all Revit commands"/>
+                    </TextBlock>
+                </StackPanel>
+
+                <!-- Shebang empty state (shows all commands) -->
+                <StackPanel x:Name="ShebangEmptyState" Visibility="Collapsed"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Row 5: Results list -->
         <ListBox x:Name="ResultsList"
-                 Grid.Row="3"
+                 Grid.Row="5"
                  Style="{StaticResource ThemedListBox}"
                  ItemContainerStyle="{StaticResource ThemedListBoxItem}"
                  ItemsSource="{Binding Results}"
@@ -422,11 +376,29 @@
                 <GroupStyle>
                     <GroupStyle.HeaderTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding Name}"
-                                       FontSize="10"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource ExpanderHeaderText}"
-                                       Margin="4,8,4,2"/>
+                            <!-- Dot-leader section header -->
+                            <Grid Margin="4,8,4,3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0"
+                                           Text="{Binding Name}"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource SectionHeaderText}"/>
+                                <!-- Dot leader -->
+                                <Border Grid.Column="1"
+                                        BorderThickness="0,0,0,1"
+                                        Margin="6,0,6,3"
+                                        VerticalAlignment="Bottom"
+                                        Opacity="0.5"
+                                        BorderBrush="{DynamicResource DotLeaderBrush}"/>
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding ItemCount}"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource SectionHeaderText}"/>
+                            </Grid>
                         </DataTemplate>
                     </GroupStyle.HeaderTemplate>
                 </GroupStyle>
@@ -434,46 +406,181 @@
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <DockPanel>
+                        <!-- Back row styling -->
+                        <DockPanel.Style>
+                            <Style TargetType="DockPanel">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsBackRow}" Value="True">
+                                        <Setter Property="Opacity" Value="0.7"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DockPanel.Style>
+
+                        <!-- Star button (hidden for commands/shebangs/back rows/family summary rows) -->
                         <Button Content="{Binding FavoriteIcon}"
                                 DockPanel.Dock="Right"
-                                Style="{StaticResource StarButton}"
                                 Click="ToggleFavorite_Click"
-                                Tag="{Binding}"/>
-                        <TextBlock Text="{Binding ShortcutKeys}"
+                                Tag="{Binding}"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Cursor="Hand"
+                                FontSize="14"
+                                Width="28" Height="28"
+                                VerticalAlignment="Center"
+                                Foreground="{DynamicResource StarInactive}">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border Background="{TemplateBinding Background}"
+                                                        CornerRadius="2"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center">
+                                                    <ContentPresenter HorizontalAlignment="Center"
+                                                                      VerticalAlignment="Center"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsFavorite}" Value="True">
+                                            <Setter Property="Foreground" Value="{DynamicResource StarActive}"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsBackRow}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding TypeCount, Converter={StaticResource BoolToOpacity}}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+
+                        <!-- Right-aligned category/type label -->
+                        <TextBlock Text="{Binding Category}"
                                    DockPanel.Dock="Right"
                                    FontSize="10"
+                                   Foreground="{DynamicResource MutedText}"
+                                   VerticalAlignment="Center"
+                                   Margin="8,0,4,0"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="120">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsBackRow}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding TypeCount, Converter={StaticResource BoolToOpacity}}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding ShortcutKeys, Converter={StaticResource NullToCollapsedConverter}}" Value="Visible">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <!-- Keyboard shortcut display (command mode) -->
+                        <TextBlock DockPanel.Dock="Right"
+                                   FontSize="10"
                                    FontFamily="Consolas"
-                                   Foreground="{DynamicResource SecondaryText}"
+                                   Foreground="{DynamicResource MutedText}"
                                    VerticalAlignment="Center"
                                    Margin="4,0"
-                                   Opacity="0.7"
-                                   Visibility="{Binding ShortcutKeys, Converter={StaticResource NullToCollapsedConverter}}"/>
+                                   Visibility="{Binding ShortcutKeys, Converter={StaticResource NullToCollapsedConverter}}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="{Binding ShortcutKeys}"/>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <!-- Type count + disclosure chevron (family Stage 1) -->
+                        <StackPanel DockPanel.Dock="Right"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Center"
+                                    Margin="4,0">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding TypeCount, Converter={StaticResource BoolToOpacity}}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <TextBlock Text="{Binding TypeCount, StringFormat='{}{0} types'}"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource MutedText}"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,4,0"/>
+                            <!-- Disclosure chevron — visible on hover/focus -->
+                            <TextBlock Text="&#x203A;"
+                                       FontSize="14"
+                                       Foreground="{DynamicResource DisclosureChevron}"
+                                       VerticalAlignment="Center"
+                                       Opacity="0"/>
+                        </StackPanel>
+
+                        <!-- Main content -->
                         <StackPanel VerticalAlignment="Center">
+                            <!-- Back row: italic muted -->
+                            <TextBlock FontSize="11"
+                                       Foreground="{DynamicResource MutedText}"
+                                       FontStyle="Italic"
+                                       TextTrimming="CharacterEllipsis">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Setter Property="Text" Value="{Binding Name}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsBackRow}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <!-- Normal item name -->
                             <TextBlock Text="{Binding Name}"
                                        FontSize="12"
+                                       FontWeight="Medium"
                                        Foreground="{DynamicResource PrimaryText}"
-                                       TextTrimming="CharacterEllipsis"/>
-                            <TextBlock Text="{Binding Category}"
-                                       FontSize="10"
-                                       Foreground="{DynamicResource SecondaryText}"
-                                       Margin="0,1,0,0"/>
+                                       TextTrimming="CharacterEllipsis">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsBackRow}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </StackPanel>
                     </DockPanel>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
 
-        <!-- Quick Action Pill Overlay (positioned below selected item) -->
-        <Canvas x:Name="OverlayCanvas" Grid.Row="3" IsHitTestVisible="False"/>
+        <!-- Quick Action Pill Overlay -->
+        <Canvas x:Name="OverlayCanvas" Grid.Row="5" IsHitTestVisible="False"/>
         <Border x:Name="ActionBarPopup"
-                Grid.Row="3"
+                Grid.Row="5"
                 VerticalAlignment="Top"
                 HorizontalAlignment="Left"
                 Visibility="Collapsed"
                 Background="{DynamicResource ListBackground}"
                 BorderBrush="{DynamicResource SeparatorBrush}"
                 BorderThickness="1"
-                CornerRadius="6"
+                CornerRadius="2"
                 Padding="4,3"
                 Margin="8,0,8,0">
             <Border.Effect>
@@ -487,7 +594,7 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Border CornerRadius="10"
+                        <Border CornerRadius="2"
                                 Padding="8,3"
                                 Margin="0,0,4,0"
                                 Cursor="Hand">
@@ -532,7 +639,7 @@
                                            FontSize="9"
                                            VerticalAlignment="Center"
                                            Margin="2,0,0,0"
-                                           Foreground="{DynamicResource SecondaryText}"
+                                           Foreground="{DynamicResource MutedText}"
                                            Opacity="0.7"/>
                             </StackPanel>
                         </Border>
@@ -541,20 +648,19 @@
             </ItemsControl>
         </Border>
 
-        <!-- Inline Rename Overlay (positioned below selected item) -->
+        <!-- Inline Rename Overlay -->
         <Border x:Name="InlineRenamePopup"
-                Grid.Row="3"
+                Grid.Row="5"
                 VerticalAlignment="Top"
                 HorizontalAlignment="Stretch"
                 Visibility="Collapsed"
                 Background="{DynamicResource ListBackground}"
                 BorderBrush="{DynamicResource SearchBoxBorderFocus}"
                 BorderThickness="1"
-                CornerRadius="4"
+                CornerRadius="2"
                 Padding="6,4"
                 Margin="8,0,8,0">
             <StackPanel>
-                <!-- Sheet rename: two fields -->
                 <DockPanel Visibility="{Binding IsSheetRename, Converter={StaticResource BoolToVisibility}}">
                     <TextBox x:Name="RenameSheetNumberBox"
                              Width="100"
@@ -580,7 +686,6 @@
                              Text="{Binding RenameText, UpdateSourceTrigger=PropertyChanged}"
                              PreviewKeyDown="RenameBox_PreviewKeyDown"/>
                 </DockPanel>
-                <!-- Normal rename: single field -->
                 <TextBox x:Name="RenameBox"
                          FontSize="12"
                          Padding="4,3"
@@ -605,14 +710,14 @@
             </StackPanel>
         </Border>
 
-        <!-- Inline Error Overlay (positioned below selected item) -->
+        <!-- Inline Error Overlay -->
         <Border x:Name="InlineErrorPopup"
-                Grid.Row="3"
+                Grid.Row="5"
                 VerticalAlignment="Top"
                 HorizontalAlignment="Left"
                 Visibility="Collapsed"
                 Background="#E6860A"
-                CornerRadius="4"
+                CornerRadius="2"
                 Padding="8,4"
                 Margin="8,0,8,0">
             <TextBlock Text="{Binding InlineError}"

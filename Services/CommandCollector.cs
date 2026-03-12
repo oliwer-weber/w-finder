@@ -64,7 +64,8 @@ public static class CommandCollector
                 Kind = BrowserItemKind.Command,
                 CommandName = enumName,
                 RevitCommandId = revitCmdId,
-                ShortcutKeys = shortcutKeys
+                ShortcutKeys = shortcutKeys,
+                RibbonTab = "Revit Command"
             });
         }
 
@@ -89,9 +90,21 @@ public static class CommandCollector
                 Kind = BrowserItemKind.Command,
                 CommandName = null, // not a PostableCommand
                 RevitCommandId = entry.CommandId,
-                ShortcutKeys = shortcut
+                ShortcutKeys = shortcut,
+                RibbonTab = ExtractRibbonTab(entry.Paths)
             });
         }
+
+        // Inject synthetic "Rauncher Settings" command so it appears in : command mode
+        items.Add(new BrowserItem
+        {
+            Name = "Rauncher Settings",
+            Category = "Plugin",
+            ElementId = -9999,
+            Kind = BrowserItemKind.Command,
+            CommandName = "__rauncher_settings",
+            RevitCommandId = null
+        });
 
         _cached = items;
         return _cached;
@@ -132,6 +145,21 @@ public static class CommandCollector
             raw = raw.Substring(0, semiIdx).Trim();
 
         return raw;
+    }
+
+    /// <summary>
+    /// Extracts the top-level ribbon tab from the Paths attribute.
+    /// "Architecture>Build; Structure>Structure" → "Architecture"
+    /// </summary>
+    private static string ExtractRibbonTab(string? paths)
+    {
+        if (string.IsNullOrEmpty(paths)) return "Other";
+
+        var semiIdx = paths.IndexOf(';');
+        var first = semiIdx >= 0 ? paths.Substring(0, semiIdx).Trim() : paths.Trim();
+
+        var gtIdx = first.IndexOf('>');
+        return gtIdx >= 0 ? first.Substring(0, gtIdx).Trim() : first.Trim();
     }
 
     /// <summary>

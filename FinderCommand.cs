@@ -27,6 +27,13 @@ public class FinderCommand : IExternalCommand
             var doc = uiApp.ActiveUIDocument?.Document;
             if (doc != null)
             {
+                // Initialize recent items store for this project
+                var projectKey = doc.IsModelInCloud
+                    ? doc.GetCloudModelPath().GetModelGUID().ToString()
+                    : doc.PathName;
+                if (!string.IsNullOrEmpty(projectKey))
+                    RecentItemsStore.SetProject(projectKey);
+
                 var items = BrowserItemCollector.Collect(doc);
                 var favoriteIds = FavoritesStore.Load(doc);
                 App.ViewModel.LoadItems(items, favoriteIds);
@@ -35,6 +42,9 @@ public class FinderCommand : IExternalCommand
             // Load command and shebang items (static, not per-document)
             App.ViewModel.LoadCommands(CommandCollector.Collect(uiApp));
             App.ViewModel.LoadShebangs(ShebangService.Collect());
+
+            // Apply current settings
+            App.ViewModel.FilterPlacedTypes = SettingsService.Current.FilterPlacedTypesOnly;
 
             pane.Show();
             App.ViewModel.RequestFocusSearch();
