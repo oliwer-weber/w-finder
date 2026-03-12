@@ -524,6 +524,11 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public void ConfirmInlineRename()
     {
         if (RenameItem == null) return;
+        if (IsExcelExportMode)
+        {
+            ConfirmExcelExport();
+            return;
+        }
         if (IsShortcutEditMode)
         {
             ConfirmShortcutEdit();
@@ -537,6 +542,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     {
         IsInlineRenameVisible = false;
         IsShortcutEditMode = false;
+        IsExcelExportMode = false;
         RenameItem = null;
         RenameText = string.Empty;
         RenameSheetNumber = string.Empty;
@@ -579,7 +585,39 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         CloseInlineRename();
     }
 
-    // ── Inline Error ───────────────────────────────────────────────
+    // ── Excel Export (reuses inline rename popup) ─────────────────
+
+    private bool _isExcelExportMode;
+    public bool IsExcelExportMode
+    {
+        get => _isExcelExportMode;
+        set { _isExcelExportMode = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>Fired when the user confirms the export filename.</summary>
+    public event Action<BrowserItem, string>? ExcelExportConfirmed;
+
+    public void OpenExcelExportInput(BrowserItem item)
+    {
+        CloseActionBar();
+        ClearInlineError();
+        RenameItem = item;
+        IsSheetRename = false;
+        IsExcelExportMode = true;
+        RenameText = item.Name;
+
+        IsInlineRenameVisible = true;
+        FocusRenameRequested?.Invoke();
+    }
+
+    public void ConfirmExcelExport()
+    {
+        if (RenameItem == null) return;
+        ExcelExportConfirmed?.Invoke(RenameItem, RenameText);
+        CloseInlineRename();
+    }
+
+    // ── Inline Message (Error / Success) ─────────────────────────
 
     private string? _inlineError;
     public string? InlineError
@@ -590,14 +628,45 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     public bool HasInlineError => !string.IsNullOrEmpty(_inlineError);
 
+    private bool _isSuccessMessage;
+    public bool IsSuccessMessage
+    {
+        get => _isSuccessMessage;
+        set { _isSuccessMessage = value; OnPropertyChanged(); }
+    }
+
+    private DispatcherTimer? _inlineMessageTimer;
+
     public void ShowInlineError(string message)
     {
+        IsSuccessMessage = false;
         InlineError = message;
+        StartInlineMessageTimer();
+    }
+
+    public void ShowInlineSuccess(string message)
+    {
+        IsSuccessMessage = true;
+        InlineError = message;
+        StartInlineMessageTimer();
     }
 
     public void ClearInlineError()
     {
+        _inlineMessageTimer?.Stop();
         InlineError = null;
+    }
+
+    private void StartInlineMessageTimer()
+    {
+        _inlineMessageTimer?.Stop();
+        _inlineMessageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        _inlineMessageTimer.Tick += (_, _) =>
+        {
+            _inlineMessageTimer.Stop();
+            ClearInlineError();
+        };
+        _inlineMessageTimer.Start();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

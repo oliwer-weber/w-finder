@@ -34,6 +34,7 @@ public partial class FinderPaneView : UserControl
         App.ViewModel.FocusRenameRequested += OnFocusRenameRequested;
         App.ViewModel.InlineRenameConfirmed += OnInlineRenameConfirmed;
         App.ViewModel.ShortcutEditConfirmed += OnShortcutEditConfirmed;
+        App.ViewModel.ExcelExportConfirmed += OnExcelExportConfirmed;
         App.ViewModel.RefreshRequested += OnRefreshRequested;
 
         ApplyTheme(ThemeService.IsDarkMode());
@@ -55,6 +56,10 @@ public partial class FinderPaneView : UserControl
 
         if (e.PropertyName == nameof(FinderPaneViewModel.HasInlineError))
         {
+            // Set background color: green for success, orange for error
+            InlineErrorPopup.Background = App.ViewModel.IsSuccessMessage
+                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2E, 0x7D, 0x32))
+                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE6, 0x86, 0x0A));
             PositionOverlay(InlineErrorPopup);
             return;
         }
@@ -406,6 +411,11 @@ public partial class FinderPaneView : UserControl
                 ExecuteActionByKind(Models.QuickActionKind.Duplicate);
                 break;
 
+            case Key.E when App.ViewModel.IsActionBarVisible && Keyboard.Modifiers == ModifierKeys.None:
+                e.Handled = true;
+                ExecuteActionByKind(Models.QuickActionKind.ExcelExport);
+                break;
+
             case Key.F when Keyboard.Modifiers == ModifierKeys.Control:
                 e.Handled = true;
                 if (App.ViewModel.HighlightedItem is BrowserItem favItem)
@@ -628,6 +638,10 @@ public partial class FinderPaneView : UserControl
                 DuplicateView(item, ViewDuplicateOption.AsDependent);
                 break;
 
+            case Models.QuickActionKind.ExcelExport:
+                App.ViewModel.OpenExcelExportInput(item);
+                break;
+
             case Models.QuickActionKind.AssignShortcut:
                 App.ViewModel.OpenShortcutEdit(item);
                 break;
@@ -832,6 +846,85 @@ public partial class FinderPaneView : UserControl
         {
             App.ViewModel.ShowInlineError("Failed to remove shortcut");
         }
+    }
+
+    private void OnExcelExportConfirmed(BrowserItem item, string filename)
+    {
+        // Sanitize filename and ensure .xlsx extension
+        var sanitized = string.Join("_", filename.Split(System.IO.Path.GetInvalidFileNameChars()));
+        if (string.IsNullOrWhiteSpace(sanitized))
+            sanitized = "Schedule";
+        if (!sanitized.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+            sanitized += ".xlsx";
+
+        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var fullPath = System.IO.Path.Combine(documentsPath, sanitized);
+
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var element = doc.GetElement(new ElementId(item.ElementId));
+            if (element is not ViewSchedule schedule)
+            {
+                Dispatcher.Invoke(() => App.ViewModel.ShowInlineError("Element is not a schedule"));
+                return;
+            }
+
+            try
+            {
+                var tableData = schedule.GetTableData();
+                var headerSection = tableData.GetSectionData(SectionType.Header);
+                var bodySection = tableData.GetSectionData(SectionType.Body);
+
+                using var workbook = new ClosedXML.Excel.XLWorkbook();
+                var sheetName = schedule.Name.Length > 31
+                    ? schedule.Name.Substring(0, 31)
+                    : schedule.Name;
+                var worksheet = workbook.Worksheets.Add(sheetName);
+
+                int excelRow = 1;
+
+                // Write column headers from the Header section (last row has field names)
+                if (headerSection != null && headerSection.NumberOfRows > 0)
+                {
+                    int lastHeaderRow = headerSection.NumberOfRows - 1;
+                    for (int c = 0; c < headerSection.NumberOfColumns; c++)
+                    {
+                        worksheet.Cell(1, c + 1).Value = schedule.GetCellText(SectionType.Header, lastHeaderRow, c);
+                        worksheet.Cell(1, c + 1).Style.Font.Bold = true;
+                    }
+                    excelRow = 2;
+                }
+
+                // Write ALL body rows as data (use ViewSchedule.GetCellText for reliability)
+                if (bodySection != null && bodySection.NumberOfRows > 0)
+                {
+                    for (int r = 0; r < bodySection.NumberOfRows; r++)
+                    {
+                        for (int c = 0; c < bodySection.NumberOfColumns; c++)
+                        {
+                            worksheet.Cell(excelRow, c + 1).Value = schedule.GetCellText(SectionType.Body, r, c);
+                        }
+                        excelRow++;
+                    }
+                }
+
+                worksheet.Columns().AdjustToContents();
+                workbook.SaveAs(fullPath);
+
+                Dispatcher.Invoke(() => App.ViewModel.ShowInlineSuccess($"Exported to {fullPath}"));
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.Invoke(() => App.ViewModel.ShowInlineError($"Export failed: {ex.Message}"));
+            }
+        });
+
+        // Return focus to search box
+        SearchBox.Focus();
+        Keyboard.Focus(SearchBox);
     }
 
     /// <summary>

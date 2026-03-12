@@ -12,6 +12,7 @@ public static class QuickActionResolver
     private static readonly QuickAction Duplicate = new() { Kind = QuickActionKind.Duplicate, Label = "Duplicate", Shortcut = "D" };
     private static readonly QuickAction DupDetailing = new() { Kind = QuickActionKind.DuplicateWithDetailing, Label = "Dup+Detail", Shortcut = "Shift+D" };
     private static readonly QuickAction DupDependent = new() { Kind = QuickActionKind.DuplicateDependent, Label = "Dependent", Shortcut = "Ctrl+D" };
+    private static readonly QuickAction ExcelExport = new() { Kind = QuickActionKind.ExcelExport, Label = "Excel Export", Shortcut = "E" };
     private static readonly QuickAction SetShortcut = new() { Kind = QuickActionKind.AssignShortcut, Label = "Set Shortcut", Shortcut = "S" };
     private static readonly QuickAction ClearShortcut = new() { Kind = QuickActionKind.RemoveShortcut, Label = "Remove Shortcut", Shortcut = "R" };
 
@@ -21,7 +22,7 @@ public static class QuickActionResolver
         {
             BrowserItemKind.View => new List<QuickAction> { Rename, Delete, Duplicate, DupDetailing, DupDependent },
             BrowserItemKind.Sheet => new List<QuickAction> { Rename, Delete, Duplicate, DupDetailing },
-            BrowserItemKind.Schedule => new List<QuickAction> { Rename, Delete, Duplicate },
+            BrowserItemKind.Schedule => new List<QuickAction> { Rename, Delete, Duplicate, ExcelExport },
             BrowserItemKind.Family or BrowserItemKind.FamilyType => new List<QuickAction> { Rename, Delete },
             BrowserItemKind.Group => new List<QuickAction> { Rename, Delete },
             BrowserItemKind.RevitLink or BrowserItemKind.Assembly => new List<QuickAction> { Rename, Delete },
