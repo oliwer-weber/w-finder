@@ -13,10 +13,6 @@
         <local:NullToCollapsedConverter x:Key="NullToCollapsedConverter"/>
         <local:BoolToOpacityConverter x:Key="BoolToOpacity"/>
 
-        <!-- Animation timing tokens -->
-        <Duration x:Key="AnimFast">0:0:0.08</Duration>
-        <Duration x:Key="AnimNormal">0:0:0.11</Duration>
-
         <!-- Flat ListBox style -->
         <Style x:Key="ThemedListBox" TargetType="ListBox">
             <Setter Property="Background" Value="{DynamicResource ListBackground}"/>
@@ -228,7 +224,6 @@
                 <!-- Mode Pill (inside search box, left side) -->
                 <Border x:Name="ModePillBorder"
                         DockPanel.Dock="Left"
-                        Visibility="{Binding HasModePill, Converter={StaticResource BoolToVisibility}}"
                         Margin="4,3,0,3"
                         Padding="3,1,5,1"
                         CornerRadius="2"
@@ -236,11 +231,12 @@
                     <Border.Style>
                         <Style TargetType="Border">
                             <Setter Property="Background" Value="Transparent"/>
-                            <Setter Property="BorderThickness" Value="2,1,1,1"/>
+                            <Setter Property="BorderThickness" Value="1"/>
                             <Setter Property="BorderBrush" Value="{DynamicResource PillBorder}"/>
                         </Style>
                     </Border.Style>
-                    <TextBlock Text="{Binding ModePillText}"
+                    <TextBlock x:Name="ModePillTextBlock"
+                               Text="{Binding ModePillText}"
                                FontSize="10"
                                FontFamily="Segoe UI"
                                Foreground="{DynamicResource PillText}"
@@ -333,9 +329,6 @@
                 Margin="4,4">
 
             <StackPanel>
-                <!-- Browser empty state (kept for compatibility, hints moved to Row 2) -->
-                <StackPanel x:Name="BrowserEmptyState" Visibility="Collapsed"/>
-
                 <!-- Place/Edit empty state -->
                 <StackPanel x:Name="PlaceEmptyState" Visibility="Collapsed">
                     <!-- Category chips -->
@@ -357,8 +350,6 @@
                     </TextBlock>
                 </StackPanel>
 
-                <!-- Shebang empty state (shows all commands) -->
-                <StackPanel x:Name="ShebangEmptyState" Visibility="Collapsed"/>
             </StackPanel>
         </Border>
 

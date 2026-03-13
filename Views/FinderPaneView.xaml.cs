@@ -3,7 +3,6 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -59,7 +58,7 @@ public partial class FinderPaneView : UserControl
     /// </summary>
     private void SearchBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
     {
-        if (App.ViewModel.HasModePill) return; // Already in a mode
+        if (App.ViewModel.ActiveMode != ActiveMode.Browser) return; // Already in a mode
 
         // Only consume prefix if the search box is empty (or effectively empty)
         if (!string.IsNullOrEmpty(App.ViewModel.SearchText)) return;
@@ -95,11 +94,14 @@ public partial class FinderPaneView : UserControl
     /// </summary>
     private void UpdateModePillAccent()
     {
-        if (!App.ViewModel.HasModePill)
+        if (App.ViewModel.ActiveMode == ActiveMode.Browser)
         {
-            // Fade out pill
-            var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(60));
-            ModePillBorder.BeginAnimation(OpacityProperty, fadeOut);
+            // Neutral pill: oxford-blue border all around, no accent tint
+            var pillBorder = (SolidColorBrush)FindResource("PillBorder");
+            ModePillBorder.BorderBrush = pillBorder;
+            ModePillBorder.BorderThickness = new Thickness(1);
+            ModePillBorder.Background = Brushes.Transparent;
+            ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("BrowserPillText");
             return;
         }
 
@@ -112,27 +114,18 @@ public partial class FinderPaneView : UserControl
             _ => WpfColor.FromArgb(0, 0, 0, 0)
         };
 
-        // Set the left border to accent, other borders to PillBorder
-        var pillBorderBrush = (SolidColorBrush)FindResource("PillBorder");
-        ModePillBorder.BorderBrush = pillBorderBrush;
-        ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
-
-        // Override the left border color using a custom border approach
-        // WPF doesn't support per-side border colors natively, so we use a nested approach
-        // For simplicity, tint the entire left border with accent
+        // All borders use accent color — thicker left for identity signal
         var accentBrush = new SolidColorBrush(accentColor);
         accentBrush.Freeze();
         ModePillBorder.BorderBrush = accentBrush;
-        ModePillBorder.BorderThickness = new Thickness(2, 0, 0, 0);
+        ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
 
-        // Set pill background to accent at 8% opacity
-        var bgColor = WpfColor.FromArgb((byte)(255 * 0.08), accentColor.R, accentColor.G, accentColor.B);
+        // Accent background tint at 14% — enough to feel intentional
+        var bgColor = WpfColor.FromArgb((byte)(255 * 0.14), accentColor.R, accentColor.G, accentColor.B);
         ModePillBorder.Background = new SolidColorBrush(bgColor);
 
-        // Fade in pill
-        ModePillBorder.Opacity = 0;
-        var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(80));
-        ModePillBorder.BeginAnimation(OpacityProperty, fadeIn);
+        // Bright pill text for colored modes
+        ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("PillText");
     }
 
     // ── Empty State Management ─────────────────────────────────────
@@ -147,10 +140,8 @@ public partial class FinderPaneView : UserControl
             : WpfVisibility.Collapsed;
 
         // Hide all empty state panels first
-        BrowserEmptyState.Visibility = WpfVisibility.Collapsed;
         PlaceEmptyState.Visibility = WpfVisibility.Collapsed;
         CommandEmptyState.Visibility = WpfVisibility.Collapsed;
-        ShebangEmptyState.Visibility = WpfVisibility.Collapsed;
 
         if (!isEmpty)
         {
@@ -172,14 +163,13 @@ public partial class FinderPaneView : UserControl
                 CommandEmptyState.Visibility = WpfVisibility.Visible;
                 break;
             case ActiveMode.Shebang:
-                ShebangEmptyState.Visibility = WpfVisibility.Visible;
+                // Shebang mode shows all commands in results — no empty state needed
                 break;
         }
 
         // Only show EmptyStatePanel if a non-browser empty state is active
         bool hasNonBrowserContent = PlaceEmptyState.Visibility == WpfVisibility.Visible
-            || CommandEmptyState.Visibility == WpfVisibility.Visible
-            || ShebangEmptyState.Visibility == WpfVisibility.Visible;
+            || CommandEmptyState.Visibility == WpfVisibility.Visible;
 
         if (!hasNonBrowserContent)
         {
@@ -188,14 +178,6 @@ public partial class FinderPaneView : UserControl
         }
 
         EmptyStatePanel.Visibility = WpfVisibility.Visible;
-
-        // Fade in empty state
-        EmptyStatePanel.Opacity = 0;
-        var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(90))
-        {
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-        EmptyStatePanel.BeginAnimation(OpacityProperty, fadeIn);
     }
 
     /// <summary>
@@ -294,9 +276,7 @@ public partial class FinderPaneView : UserControl
         {
             UpdateModePillAccent();
             UpdateEmptyState();
-
-            // Crossfade results on mode switch
-            CrossfadeResults(() => UpdateResultGrouping());
+            UpdateResultGrouping();
             return;
         }
 
@@ -306,26 +286,10 @@ public partial class FinderPaneView : UserControl
             return;
         }
 
-        if (e.PropertyName == nameof(FinderPaneViewModel.FamilyNavigationStage))
-        {
-            // Crossfade results on stage transition
-            CrossfadeResults(null);
-            return;
-        }
-
         if (e.PropertyName == nameof(FinderPaneViewModel.HighlightedItem))
         {
             SyncListSelections();
             return;
-        }
-
-        // Keep grouping in sync when results refresh
-        if (e.PropertyName == nameof(FinderPaneViewModel.IsFamilyMode)
-            || e.PropertyName == nameof(FinderPaneViewModel.IsCommandMode)
-            || e.PropertyName == nameof(FinderPaneViewModel.IsShebangMode)
-            || e.PropertyName == nameof(FinderPaneViewModel.IsBrowserMode))
-        {
-            UpdateResultGrouping();
         }
     }
 
@@ -365,28 +329,6 @@ public partial class FinderPaneView : UserControl
         }
     }
 
-    /// <summary>
-    /// Crossfades the results list: fade out, optionally do work, fade in.
-    /// </summary>
-    private void CrossfadeResults(Action? midAction)
-    {
-        var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(50))
-        {
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-        fadeOut.Completed += (_, _) =>
-        {
-            midAction?.Invoke();
-
-            var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(60))
-            {
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-            };
-            ResultsList.BeginAnimation(OpacityProperty, fadeIn);
-        };
-        ResultsList.BeginAnimation(OpacityProperty, fadeOut);
-    }
-
     // ── Overlay Positioning ────────────────────────────────────────
 
     private void PositionOverlay(Border overlay)
@@ -408,10 +350,13 @@ public partial class FinderPaneView : UserControl
             return;
         }
 
+        ListBox ownerList = ResultsList;
         var container = ResultsList.ItemContainerGenerator.ContainerFromItem(highlighted) as ListBoxItem;
         if (container == null)
         {
             container = FavoritesList.ItemContainerGenerator.ContainerFromItem(highlighted) as ListBoxItem;
+            if (container != null)
+                ownerList = FavoritesList;
         }
 
         if (container == null)
@@ -421,7 +366,7 @@ public partial class FinderPaneView : UserControl
             return;
         }
 
-        var transform = container.TransformToAncestor(ResultsList);
+        var transform = container.TransformToAncestor(ownerList);
         var point = transform.Transform(new WpfPoint(0, container.ActualHeight));
 
         overlay.Margin = new Thickness(8, point.Y, 8, 0);
@@ -495,8 +440,8 @@ public partial class FinderPaneView : UserControl
         switch (e.Key)
         {
             case Key.Back:
-                // Backspace on empty text with a mode pill → deactivate mode
-                if (string.IsNullOrEmpty(App.ViewModel.SearchText) && App.ViewModel.HasModePill)
+                // Backspace on empty text with a colored mode pill → deactivate to Browser
+                if (string.IsNullOrEmpty(App.ViewModel.SearchText) && App.ViewModel.ActiveMode != ActiveMode.Browser)
                 {
                     e.Handled = true;
                     App.ViewModel.DeactivateMode();
@@ -525,9 +470,9 @@ public partial class FinderPaneView : UserControl
                     // Escape in Stage 2 → back to Stage 1
                     App.ViewModel.NavigateBackToFamilies();
                 }
-                else if (App.ViewModel.HasModePill)
+                else if (App.ViewModel.ActiveMode != ActiveMode.Browser)
                 {
-                    // Escape with a mode pill → clear and return to Browser
+                    // Escape with a colored mode pill → clear and return to Browser
                     App.ViewModel.DeactivateMode();
                     UpdateModePillAccent();
                     UpdateEmptyState();
