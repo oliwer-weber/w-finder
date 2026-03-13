@@ -16,6 +16,19 @@ public class ResetPaneCommand : IExternalCommand
     {
         try
         {
+            var dialog = new TaskDialog("Quip")
+            {
+                MainInstruction = "Pane lost?",
+                MainContent = "Reset its position to default, then restart Revit. " +
+                              "Your settings and data are untouched.",
+                CommonButtons = TaskDialogCommonButtons.Cancel,
+            };
+            dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Reset position");
+
+            var result = dialog.Show();
+            if (result != TaskDialogResult.CommandLink1)
+                return Result.Cancelled;
+
             // Generate a brand-new GUID and persist it
             var newGuid = Guid.NewGuid();
             string dir = Path.GetDirectoryName(App.PaneGuidFilePath)!;
@@ -27,16 +40,10 @@ public class ResetPaneCommand : IExternalCommand
             var pane = uiApp.GetDockablePane(App.PaneId);
             pane.Hide();
             pane.Show();
-
-            TaskDialog.Show("Rauncher",
-                "Pane reset scheduled!\n\n" +
-                "A new pane ID has been saved. Restart Revit and the pane " +
-                "will reappear as a floating window near the top-left of your screen.\n\n" +
-                "(The hide/show trick was also attempted — check if the pane is visible now.)");
         }
         catch (Exception ex)
         {
-            TaskDialog.Show("Rauncher Error", ex.ToString());
+            TaskDialog.Show("Quip Error", ex.ToString());
         }
 
         return Result.Succeeded;

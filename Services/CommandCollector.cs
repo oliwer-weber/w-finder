@@ -76,7 +76,10 @@ public static class CommandCollector
             if (coveredCommandIds.Contains(entry.CommandId)) continue;
 
             // Skip our own plugin commands
-            if (entry.CommandId.Contains("Rauncher", StringComparison.OrdinalIgnoreCase)) continue;
+            if (entry.CommandId.Contains("Quip", StringComparison.OrdinalIgnoreCase)) continue;
+
+            // Skip third-party add-in commands — they cannot be posted via PostCommand()
+            if (entry.CommandId.StartsWith("CustomCtrl_", StringComparison.OrdinalIgnoreCase)) continue;
 
             var displayName = CleanXmlCommandName(entry.CommandName);
             var category = FormatPaths(entry.Paths);
@@ -95,14 +98,14 @@ public static class CommandCollector
             });
         }
 
-        // Inject synthetic "Rauncher Settings" command so it appears in : command mode
+        // Inject synthetic "Quip Settings" command so it appears in : command mode
         items.Add(new BrowserItem
         {
-            Name = "Rauncher Settings",
+            Name = "Quip Settings",
             Category = "Plugin",
             ElementId = -9999,
             Kind = BrowserItemKind.Command,
-            CommandName = "__rauncher_settings",
+            CommandName = "__quip_settings",
             RevitCommandId = null
         });
 

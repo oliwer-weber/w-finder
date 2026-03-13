@@ -6,7 +6,7 @@ using w_finder.Services;
 namespace w_finder;
 
 /// <summary>
-/// Toggles the Rauncher dockable pane visibility when the ribbon button is clicked.
+/// Toggles the Quip dockable pane visibility when the ribbon button is clicked.
 /// Also refreshes the browser item cache each time the pane is shown.
 /// </summary>
 [Transaction(TransactionMode.Manual)]
@@ -14,7 +14,16 @@ public class FinderCommand : IExternalCommand
 {
     public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
     {
-        var uiApp = commandData.Application;
+        TogglePane(commandData.Application);
+        return Result.Succeeded;
+    }
+
+    /// <summary>
+    /// Toggles the Quip pane visibility. Extracted as a static method so both
+    /// the ribbon command and the global keyboard hook can call it.
+    /// </summary>
+    public static void TogglePane(UIApplication uiApp)
+    {
         var pane = uiApp.GetDockablePane(App.PaneId);
 
         if (pane.IsShown())
@@ -49,7 +58,5 @@ public class FinderCommand : IExternalCommand
             pane.Show();
             App.ViewModel.RequestFocusSearch();
         }
-
-        return Result.Succeeded;
     }
 }

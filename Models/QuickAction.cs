@@ -9,7 +9,8 @@ public enum QuickActionKind
     DuplicateDependent,
     ExcelExport,
     AssignShortcut,
-    RemoveShortcut
+    RemoveShortcut,
+    EditFamily
 }
 
 public class QuickAction

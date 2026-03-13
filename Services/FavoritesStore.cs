@@ -17,7 +17,7 @@ public static class FavoritesStore
     // AppData folder for cloud model favorites
     private static readonly string AppDataFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "Rauncher", "favorites");
+        "Quip", "favorites");
 
     private static string GetFilePath(Document doc)
     {
@@ -31,7 +31,7 @@ public static class FavoritesStore
         }
 
         // Local models: sidecar file next to the .rvt
-        return doc.PathName + ".wfinder-favorites.json";
+        return doc.PathName + ".quip-favorites.json";
     }
 
     public static HashSet<long> Load(Document doc)
