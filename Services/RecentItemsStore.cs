@@ -11,7 +11,7 @@ public static class RecentItemsStore
 {
     private static readonly string StoreDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "Rauncher", "recents");
+        "Quip", "recents");
 
     private static string? _currentFilePath;
     private static RecentData _data = new();

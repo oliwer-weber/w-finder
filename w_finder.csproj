@@ -6,6 +6,8 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AssemblyName>Quip</AssemblyName>
+    <Product>Quip</Product>
   </PropertyGroup>
 
   <ItemGroup>

@@ -4,17 +4,17 @@ using System.Text.Json;
 namespace w_finder.Services;
 
 /// <summary>
-/// Central settings persistence for Rauncher.
+/// Central settings persistence for Quip.
 /// Stores all preferences in a single JSON file under AppData.
 /// Replaces the old ThemeService (migrates theme.txt automatically).
 /// </summary>
 public static class SettingsService
 {
-    private static RauncherSettings _settings = new();
+    private static QuipSettings _settings = new();
 
     private static readonly string SettingsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "Rauncher");
+        "Quip");
 
     private static readonly string SettingsFile = Path.Combine(SettingsDir, "settings.json");
 
@@ -34,17 +34,19 @@ public static class SettingsService
     /// <summary>
     /// Returns a copy of the current settings so callers can mutate freely.
     /// </summary>
-    public static RauncherSettings Current => new()
+    public static QuipSettings Current => new()
     {
         IsDarkMode = _settings.IsDarkMode,
         DefaultExportPath = _settings.DefaultExportPath,
-        FilterPlacedTypesOnly = _settings.FilterPlacedTypesOnly
+        FilterPlacedTypesOnly = _settings.FilterPlacedTypesOnly,
+        HotkeyKey = _settings.HotkeyKey,
+        HotkeyModifiers = _settings.HotkeyModifiers
     };
 
     /// <summary>
     /// Persists updated settings and notifies subscribers.
     /// </summary>
-    public static void Save(RauncherSettings settings)
+    public static void Save(QuipSettings settings)
     {
         _settings = settings;
         try
@@ -67,7 +69,7 @@ public static class SettingsService
             if (File.Exists(SettingsFile))
             {
                 var json = File.ReadAllText(SettingsFile);
-                _settings = JsonSerializer.Deserialize<RauncherSettings>(json) ?? new();
+                _settings = JsonSerializer.Deserialize<QuipSettings>(json) ?? new();
                 return;
             }
 
@@ -75,7 +77,7 @@ public static class SettingsService
             if (File.Exists(LegacyThemeFile))
             {
                 var themeText = File.ReadAllText(LegacyThemeFile).Trim();
-                _settings = new RauncherSettings
+                _settings = new QuipSettings
                 {
                     IsDarkMode = themeText == "dark"
                 };
@@ -91,11 +93,17 @@ public static class SettingsService
 }
 
 /// <summary>
-/// All Rauncher user preferences. Add new settings here as needed.
+/// All Quip user preferences. Add new settings here as needed.
 /// </summary>
-public class RauncherSettings
+public class QuipSettings
 {
     public bool IsDarkMode { get; set; }
     public string DefaultExportPath { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
     public bool FilterPlacedTypesOnly { get; set; }
+
+    /// <summary>Virtual key code for the global hotkey. Default: 0x20 = Space.</summary>
+    public int HotkeyKey { get; set; } = 0x20;
+
+    /// <summary>Modifier flags for the global hotkey. Default: 0x02 = Ctrl. (Ctrl=0x02, Alt=0x01, Shift=0x04)</summary>
+    public int HotkeyModifiers { get; set; } = 0x02;
 }

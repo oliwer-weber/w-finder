@@ -97,7 +97,7 @@ public static class ShebangService
 
         bool switchToMetric = imperialCount >= metricCount;
 
-        using (var tx = new Transaction(doc, "Rauncher: Toggle Units"))
+        using (var tx = new Transaction(doc, "Quip: Toggle Units"))
         {
             tx.Start();
 
@@ -145,7 +145,7 @@ public static class ShebangService
 
         int pinned = 0;
 
-        using (var tx = new Transaction(doc, "Rauncher: Pin Levels, Grids & Links"))
+        using (var tx = new Transaction(doc, "Quip: Pin Levels, Grids & Links"))
         {
             tx.Start();
 

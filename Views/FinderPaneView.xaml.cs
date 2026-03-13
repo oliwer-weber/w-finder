@@ -108,7 +108,6 @@ public partial class FinderPaneView : UserControl
         WpfColor accentColor = App.ViewModel.ActiveMode switch
         {
             ActiveMode.Place => (WpfColor)FindResource("PlaceAccentColor"),
-            ActiveMode.Edit => (WpfColor)FindResource("EditAccentColor"),
             ActiveMode.Command => (WpfColor)FindResource("CommandAccentColor"),
             ActiveMode.Shebang => (WpfColor)FindResource("ShebangAccentColor"),
             _ => WpfColor.FromArgb(0, 0, 0, 0)
@@ -155,7 +154,6 @@ public partial class FinderPaneView : UserControl
                 // Hints are now in BrowserHints (Row 2), nothing extra here
                 break;
             case ActiveMode.Place:
-            case ActiveMode.Edit:
                 PlaceEmptyState.Visibility = WpfVisibility.Visible;
                 PopulateCategoryChips();
                 break;
@@ -289,6 +287,26 @@ public partial class FinderPaneView : UserControl
         if (e.PropertyName == nameof(FinderPaneViewModel.HighlightedItem))
         {
             SyncListSelections();
+
+            // In Place mode at Type Level, auto-select the highlighted type in Revit
+            // so the Properties pane updates to reflect the family/type.
+            // This is needed for Edit Family to work — Revit requires the type selected.
+            if (App.ViewModel.IsFamilyMode
+                && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.TypeLevel
+                && App.ViewModel.HighlightedItem is BrowserItem hi
+                && !hi.IsBackRow
+                && hi.Kind == BrowserItemKind.FamilyType
+                && hi.ElementId > 0)
+            {
+                var elementId = hi.ElementId;
+                RevitBackgroundTask.Raise(uiApp =>
+                {
+                    var uidoc = uiApp.ActiveUIDocument;
+                    if (uidoc == null) return;
+                    uidoc.Selection.SetElementIds(new List<ElementId> { new ElementId(elementId) });
+                });
+            }
+
             return;
         }
     }
@@ -539,7 +557,7 @@ public partial class FinderPaneView : UserControl
                     else if (App.ViewModel.IsCommandMode && highlighted.Kind == BrowserItemKind.Command)
                     {
                         var cmdName = highlighted.CommandName;
-                        if (cmdName == "__rauncher_settings")
+                        if (cmdName == "__quip_settings")
                         {
                             RevitBackgroundTask.Raise(uiApp =>
                             {
@@ -556,10 +574,24 @@ public partial class FinderPaneView : UserControl
                         {
                             RevitBackgroundTask.Raise(uiApp =>
                             {
-                                var pane = uiApp.GetDockablePane(App.PaneId);
-                                pane.Hide();
-                                var cmdId = RevitCommandId.LookupPostableCommandId(postableCmd);
-                                uiApp.PostCommand(cmdId);
+                                try
+                                {
+                                    var cmdId = RevitCommandId.LookupPostableCommandId(postableCmd);
+                                    if (cmdId == null || !uiApp.CanPostCommand(cmdId))
+                                    {
+                                        Dispatcher.Invoke(() =>
+                                            App.ViewModel.ShowInlineError("Command not available in the current context"));
+                                        return;
+                                    }
+                                    var pane = uiApp.GetDockablePane(App.PaneId);
+                                    pane.Hide();
+                                    uiApp.PostCommand(cmdId);
+                                }
+                                catch
+                                {
+                                    Dispatcher.Invoke(() =>
+                                        App.ViewModel.ShowInlineError("Command not available in the current context"));
+                                }
                             });
                         }
                         else if (highlighted.RevitCommandId != null)
@@ -567,68 +599,54 @@ public partial class FinderPaneView : UserControl
                             var revitCmdIdStr = highlighted.RevitCommandId;
                             RevitBackgroundTask.Raise(uiApp =>
                             {
-                                var pane = uiApp.GetDockablePane(App.PaneId);
-                                pane.Hide();
                                 try
                                 {
                                     var cmdId = RevitCommandId.LookupCommandId(revitCmdIdStr);
-                                    if (cmdId != null)
-                                        uiApp.PostCommand(cmdId);
+                                    if (cmdId == null || !uiApp.CanPostCommand(cmdId))
+                                    {
+                                        Dispatcher.Invoke(() =>
+                                            App.ViewModel.ShowInlineError("Command not available in the current context"));
+                                        return;
+                                    }
+                                    var pane = uiApp.GetDockablePane(App.PaneId);
+                                    pane.Hide();
+                                    uiApp.PostCommand(cmdId);
                                 }
-                                catch
+                                catch (Exception ex)
                                 {
                                     Dispatcher.Invoke(() =>
-                                        App.ViewModel.ShowInlineError("Command unavailable in current context"));
+                                        App.ViewModel.ShowInlineError($"Command failed: {ex.Message}"));
                                 }
                             });
                         }
                     }
                     else if (App.ViewModel.IsFamilyMode && highlighted.Kind == BrowserItemKind.FamilyType)
                     {
-                        if (App.ViewModel.IsEditFamilyMode)
+                        RevitBackgroundTask.Raise(uiApp =>
                         {
-                            RevitBackgroundTask.Raise(uiApp =>
+                            var uidoc = uiApp.ActiveUIDocument;
+                            if (uidoc == null) return;
+                            var doc = uidoc.Document;
+                            var element = doc.GetElement(new ElementId(highlighted.ElementId));
+                            if (element is FamilySymbol symbol)
                             {
-                                var uidoc = uiApp.ActiveUIDocument;
-                                if (uidoc == null) return;
-                                var doc = uidoc.Document;
-                                var element = doc.GetElement(new ElementId(highlighted.ElementId));
-                                if (element is FamilySymbol symbol && symbol.Family != null && symbol.Family.IsEditable)
+                                using (var tx = new Transaction(doc, "Activate Family Symbol"))
                                 {
-                                    var pane = uiApp.GetDockablePane(App.PaneId);
-                                    pane.Hide();
-                                    doc.EditFamily(symbol.Family);
+                                    tx.Start();
+                                    if (!symbol.IsActive) symbol.Activate();
+                                    tx.Commit();
                                 }
-                            });
-                        }
-                        else
-                        {
-                            RevitBackgroundTask.Raise(uiApp =>
-                            {
-                                var uidoc = uiApp.ActiveUIDocument;
-                                if (uidoc == null) return;
-                                var doc = uidoc.Document;
-                                var element = doc.GetElement(new ElementId(highlighted.ElementId));
-                                if (element is FamilySymbol symbol)
+                                var pane = uiApp.GetDockablePane(App.PaneId);
+                                pane.Hide();
+                                try
                                 {
-                                    using (var tx = new Transaction(doc, "Activate Family Symbol"))
-                                    {
-                                        tx.Start();
-                                        if (!symbol.IsActive) symbol.Activate();
-                                        tx.Commit();
-                                    }
-                                    var pane = uiApp.GetDockablePane(App.PaneId);
-                                    pane.Hide();
-                                    try
-                                    {
-                                        uidoc.PromptForFamilyInstancePlacement(symbol);
-                                    }
-                                    catch (Autodesk.Revit.Exceptions.OperationCanceledException)
-                                    {
-                                    }
+                                    uidoc.PromptForFamilyInstancePlacement(symbol);
                                 }
-                            });
-                        }
+                                catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                                {
+                                }
+                            }
+                        });
                     }
                     else
                     {
@@ -728,7 +746,11 @@ public partial class FinderPaneView : UserControl
 
             case Key.E when App.ViewModel.IsActionBarVisible && Keyboard.Modifiers == ModifierKeys.None:
                 e.Handled = true;
-                ExecuteActionByKind(Models.QuickActionKind.ExcelExport);
+                // Both EditFamily and ExcelExport use "E" shortcut — pick whichever is in the active actions.
+                if (App.ViewModel.ActiveActions.Any(a => a.Kind == Models.QuickActionKind.EditFamily))
+                    ExecuteActionByKind(Models.QuickActionKind.EditFamily);
+                else
+                    ExecuteActionByKind(Models.QuickActionKind.ExcelExport);
                 break;
 
             case Key.F when Keyboard.Modifiers == ModifierKeys.Control:
@@ -758,7 +780,7 @@ public partial class FinderPaneView : UserControl
             ? "Views/DarkTheme.xaml"
             : "Views/LightTheme.xaml";
 
-        var themeUri = new Uri($"pack://application:,,,/w_finder;component/{themeFile}");
+        var themeUri = new Uri($"pack://application:,,,/Quip;component/{themeFile}");
         var themeDictionary = new ResourceDictionary { Source = themeUri };
 
         Resources.MergedDictionaries.Clear();
@@ -801,46 +823,29 @@ public partial class FinderPaneView : UserControl
 
         if (App.ViewModel.IsFamilyMode && item.Kind == BrowserItemKind.FamilyType)
         {
-            if (App.ViewModel.IsEditFamilyMode)
+            RevitBackgroundTask.Raise(uiApp =>
             {
-                RevitBackgroundTask.Raise(uiApp =>
+                var uidoc = uiApp.ActiveUIDocument;
+                if (uidoc == null) return;
+                var doc = uidoc.Document;
+                var element = doc.GetElement(new ElementId(item.ElementId));
+                if (element is FamilySymbol symbol)
                 {
-                    var uidoc = uiApp.ActiveUIDocument;
-                    if (uidoc == null) return;
-                    var doc = uidoc.Document;
-                    var element = doc.GetElement(new ElementId(item.ElementId));
-                    if (element is FamilySymbol symbol && symbol.Family != null && symbol.Family.IsEditable)
+                    using (var tx = new Transaction(doc, "Activate Family Symbol"))
                     {
-                        doc.EditFamily(symbol.Family);
+                        tx.Start();
+                        if (!symbol.IsActive) symbol.Activate();
+                        tx.Commit();
                     }
-                });
-            }
-            else
-            {
-                RevitBackgroundTask.Raise(uiApp =>
-                {
-                    var uidoc = uiApp.ActiveUIDocument;
-                    if (uidoc == null) return;
-                    var doc = uidoc.Document;
-                    var element = doc.GetElement(new ElementId(item.ElementId));
-                    if (element is FamilySymbol symbol)
+                    try
                     {
-                        using (var tx = new Transaction(doc, "Activate Family Symbol"))
-                        {
-                            tx.Start();
-                            if (!symbol.IsActive) symbol.Activate();
-                            tx.Commit();
-                        }
-                        try
-                        {
-                            uidoc.PromptForFamilyInstancePlacement(symbol);
-                        }
-                        catch (Autodesk.Revit.Exceptions.OperationCanceledException)
-                        {
-                        }
+                        uidoc.PromptForFamilyInstancePlacement(symbol);
                     }
-                });
-            }
+                    catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+                    {
+                    }
+                }
+            });
         }
         else
         {
@@ -968,7 +973,91 @@ public partial class FinderPaneView : UserControl
             case Models.QuickActionKind.RemoveShortcut:
                 HandleRemoveShortcut(item);
                 break;
+
+            case Models.QuickActionKind.EditFamily:
+                HandleEditFamily(item);
+                break;
         }
+    }
+
+    private void HandleEditFamily(BrowserItem item)
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            try
+            {
+                var uidoc = uiApp.ActiveUIDocument;
+                if (uidoc == null)
+                {
+                    Dispatcher.Invoke(() =>
+                        App.ViewModel.ShowInlineError("No active document"));
+                    return;
+                }
+                var doc = uidoc.Document;
+                var element = doc.GetElement(new ElementId(item.ElementId));
+
+                if (element == null)
+                {
+                    Dispatcher.Invoke(() =>
+                        App.ViewModel.ShowInlineError($"Element not found (ID {item.ElementId})"));
+                    return;
+                }
+
+                // Resolve the Family object.
+                Family? family = element switch
+                {
+                    FamilySymbol sym => sym.Family,
+                    Family fam => fam,
+                    FamilyInstance inst => inst.Symbol?.Family,
+                    _ => null
+                };
+
+                if (family == null)
+                {
+                    Dispatcher.Invoke(() =>
+                        App.ViewModel.ShowInlineError($"Not a family element ({element.GetType().Name})"));
+                    return;
+                }
+
+                if (!family.IsEditable)
+                {
+                    Dispatcher.Invoke(() =>
+                        App.ViewModel.ShowInlineError("Family is not editable (in-place or linked)"));
+                    return;
+                }
+
+                // Extract the family to a temp .rfa file, then open it with
+                // OpenAndActivateDocument — this forces Revit to switch to the
+                // family editor UI, same as File > Open.
+                var familyDoc = doc.EditFamily(family);
+                if (familyDoc == null)
+                {
+                    Dispatcher.Invoke(() =>
+                        App.ViewModel.ShowInlineError("Revit could not open family for editing"));
+                    return;
+                }
+
+                var familyName = family.Name;
+                var tempPath = System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(),
+                    familyName + ".rfa");
+
+                var saveOpts = new SaveAsOptions { OverwriteExistingFile = true };
+                familyDoc.SaveAs(tempPath, saveOpts);
+                familyDoc.Close(false);
+
+                // Hide the pane, then open the family file.
+                var pane = uiApp.GetDockablePane(App.PaneId);
+                pane.Hide();
+
+                uiApp.OpenAndActivateDocument(tempPath);
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.Invoke(() =>
+                    App.ViewModel.ShowInlineError($"Edit failed: {ex.Message}"));
+            }
+        });
     }
 
     private void OnInlineRenameConfirmed(BrowserItem item, string newName, string? sheetNumber)
@@ -1001,7 +1090,7 @@ public partial class FinderPaneView : UserControl
                     }
                 }
 
-                using var tx = new Transaction(doc, "Rauncher: Rename Sheet");
+                using var tx = new Transaction(doc, "Quip: Rename Sheet");
                 tx.Start();
                 if (!string.IsNullOrEmpty(trimmedNumber) && trimmedNumber != sheet.SheetNumber)
                     sheet.SheetNumber = trimmedNumber;
@@ -1014,7 +1103,7 @@ public partial class FinderPaneView : UserControl
                 var trimmed = newName.Trim();
                 if (!string.IsNullOrEmpty(trimmed) && trimmed != element.Name)
                 {
-                    using var tx = new Transaction(doc, "Rauncher: Rename");
+                    using var tx = new Transaction(doc, "Quip: Rename");
                     tx.Start();
                     element.Name = trimmed;
                     tx.Commit();
@@ -1058,7 +1147,7 @@ public partial class FinderPaneView : UserControl
                 activeUIView?.Close();
             }
 
-            using var tx = new Transaction(doc, "Rauncher: Delete");
+            using var tx = new Transaction(doc, "Quip: Delete");
             tx.Start();
             doc.Delete(elementId);
             tx.Commit();
@@ -1076,7 +1165,7 @@ public partial class FinderPaneView : UserControl
             var element = doc.GetElement(new ElementId(item.ElementId));
             if (element is View view && view.CanViewBeDuplicated(option))
             {
-                using var tx = new Transaction(doc, "Rauncher: Duplicate");
+                using var tx = new Transaction(doc, "Quip: Duplicate");
                 tx.Start();
                 view.Duplicate(option);
                 tx.Commit();

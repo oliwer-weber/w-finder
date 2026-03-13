@@ -1,4 +1,4 @@
-# CLAUDE.md — Rauncher Revit 2025 Plugin
+# CLAUDE.md — Quip Revit 2025 Plugin
 
 ## Developer Context
 - **Skill level:** Learning C# — needs guidance on syntax, patterns, and Revit API usage.

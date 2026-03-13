@@ -6,8 +6,8 @@ using w_finder.Views;
 namespace w_finder;
 
 /// <summary>
-/// Opens the Rauncher Settings dialog.
-/// Accessible from the ribbon panel and from command mode (: Rauncher Settings).
+/// Opens the Quip Settings dialog.
+/// Accessible from the ribbon panel and from command mode (: Quip Settings).
 /// </summary>
 [Transaction(TransactionMode.Manual)]
 public class SettingsCommand : IExternalCommand

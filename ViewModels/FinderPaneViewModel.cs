@@ -16,7 +16,6 @@ public enum ActiveMode
 {
     Browser,
     Place,
-    Edit,
     Command,
     Shebang
 }
@@ -59,7 +58,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     private List<BrowserItem> _shebangItems = new();
     private HashSet<long> _favoriteIds = new();
     private readonly DispatcherTimer _debounceTimer;
-    private (string query, string? categoryFilter, bool editMode)? _cachedFamilyInput;
+    private (string query, string? categoryFilter)? _cachedFamilyInput;
     private List<BrowserItem>? _cachedUnifiedList;
 
     public FinderPaneViewModel()
@@ -88,7 +87,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsBrowserMode));
             OnPropertyChanged(nameof(IsPlaceFamilyMode));
-            OnPropertyChanged(nameof(IsEditFamilyMode));
             OnPropertyChanged(nameof(IsFamilyMode));
             OnPropertyChanged(nameof(IsCommandMode));
             OnPropertyChanged(nameof(IsShebangMode));
@@ -105,7 +103,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public string ModePillText => ActiveMode switch
     {
         ActiveMode.Place => "PLACE",
-        ActiveMode.Edit => "EDIT",
         ActiveMode.Command => "CMD",
         ActiveMode.Shebang => "SHEBANG",
         _ => "BROWSER"
@@ -156,28 +153,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             _searchText = value;
             _cachedFamilyInput = null;
 
-            // Check for -e flag in family mode to toggle Place/Edit
-            if (ActiveMode == ActiveMode.Place || ActiveMode == ActiveMode.Edit)
-            {
-                var parsed = ParseFamilyInput();
-                if (parsed.editMode && ActiveMode != ActiveMode.Edit)
-                {
-                    _activeMode = ActiveMode.Edit;
-                    OnPropertyChanged(nameof(ActiveMode));
-                    OnPropertyChanged(nameof(IsEditFamilyMode));
-                    OnPropertyChanged(nameof(IsPlaceFamilyMode));
-                    OnPropertyChanged(nameof(ModePillText));
-                }
-                else if (!parsed.editMode && ActiveMode == ActiveMode.Edit)
-                {
-                    _activeMode = ActiveMode.Place;
-                    OnPropertyChanged(nameof(ActiveMode));
-                    OnPropertyChanged(nameof(IsEditFamilyMode));
-                    OnPropertyChanged(nameof(IsPlaceFamilyMode));
-                    OnPropertyChanged(nameof(ModePillText));
-                }
-            }
-
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsEmptyState));
             _debounceTimer.Stop();
@@ -185,7 +160,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         }
     }
 
-    private string _statusText = "Open a project and click the Rauncher button.";
+    private string _statusText = "Open a project and click the Quip button.";
     public string StatusText
     {
         get => _statusText;
@@ -220,10 +195,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     // ── Mode detection (backwards-compatible properties) ────────────
 
-    public bool IsFamilyMode => ActiveMode == ActiveMode.Place || ActiveMode == ActiveMode.Edit;
+    public bool IsFamilyMode => ActiveMode == ActiveMode.Place;
     public bool IsCommandMode => ActiveMode == ActiveMode.Command;
     public bool IsShebangMode => ActiveMode == ActiveMode.Shebang;
-    public bool IsEditFamilyMode => ActiveMode == ActiveMode.Edit;
     public bool IsPlaceFamilyMode => ActiveMode == ActiveMode.Place;
     public bool IsBrowserMode => ActiveMode == ActiveMode.Browser;
 
@@ -293,28 +267,15 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     // ── Family input parsing ────────────────────────────────────────
 
     /// <summary>
-    /// Parses the Family Mode input, extracting optional -c category filter,
-    /// -e edit flag, and the remaining fuzzy search query.
+    /// Parses the Family Mode input, extracting optional -c category filter
+    /// and the remaining fuzzy search query.
     /// </summary>
-    private (string query, string? categoryFilter, bool editMode) ParseFamilyInput()
+    private (string query, string? categoryFilter) ParseFamilyInput()
     {
         if (_cachedFamilyInput.HasValue) return _cachedFamilyInput.Value;
 
         var raw = _searchText.TrimStart();
         string? categoryFilter = null;
-        bool editMode = false;
-
-        // Check for -e flag (standalone, no argument)
-        int eIndex = raw.IndexOf("-e", StringComparison.OrdinalIgnoreCase);
-        if (eIndex >= 0)
-        {
-            int afterE = eIndex + 2;
-            if (afterE >= raw.Length || raw[afterE] == ' ')
-            {
-                editMode = true;
-                raw = (raw.Substring(0, eIndex) + (afterE < raw.Length ? raw.Substring(afterE) : "")).Trim();
-            }
-        }
 
         // Look for -c flag followed by a filter word
         int flagIndex = raw.IndexOf("-c ", StringComparison.OrdinalIgnoreCase);
@@ -334,7 +295,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             }
         }
 
-        _cachedFamilyInput = (raw, categoryFilter, editMode);
+        _cachedFamilyInput = (raw, categoryFilter);
         return _cachedFamilyInput.Value;
     }
 
@@ -600,7 +561,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     private void RefreshFamilyResults()
     {
-        var (query, categoryFilter, editMode) = ParseFamilyInput();
+        var (query, categoryFilter) = ParseFamilyInput();
 
         var source = _allItems.Where(i => i.Kind == BrowserItemKind.FamilyType);
 
@@ -675,7 +636,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
             Results.ReplaceAll(resultList);
 
-            var statusParts = new List<string> { editMode ? "Edit Mode" : "Place Mode" };
+            var statusParts = new List<string> { "Place Mode" };
             if (!string.IsNullOrEmpty(categoryFilter))
                 statusParts.Add($"-c {categoryFilter}");
             string prefix = string.Join(" ", statusParts);
@@ -692,7 +653,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// </summary>
     public void ApplyCategoryFilter(string category)
     {
-        if (ActiveMode != ActiveMode.Place && ActiveMode != ActiveMode.Edit)
+        if (ActiveMode != ActiveMode.Place)
             ActivateMode(ActiveMode.Place);
 
         _searchText = $"-c {category} ";

@@ -23,3 +23,6 @@ temp_directions/
 
 #Cluade stuff
 .cluade/
+
+# Installer output
+installer/output/

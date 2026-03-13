@@ -1,7 +1,7 @@
 <Window x:Class="w_finder.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Rauncher Settings"
+        Title="Quip Settings"
         SizeToContent="WidthAndHeight"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
@@ -70,6 +70,34 @@
 
         <TextBlock Text="When enabled, Place mode (> prefix) only shows family types that have at least one instance in the current project."
                    FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"
+                   Foreground="{DynamicResource InactiveText}"/>
+
+        <Separator Margin="0,12,0,12"
+                   Background="{DynamicResource SeparatorBrush}"/>
+
+        <!-- ═══ Global Hotkey ═══ -->
+        <TextBlock Text="GLOBAL HOTKEY"
+                   FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"
+                   Foreground="{DynamicResource SecondaryText}"/>
+
+        <TextBlock Text="Works even when a schedule view has keyboard focus:"
+                   FontSize="12" Margin="0,0,0,6"
+                   Foreground="{DynamicResource PrimaryText}"/>
+
+        <TextBox x:Name="HotkeyBox"
+                 IsReadOnly="True"
+                 FontSize="13" Padding="6,4"
+                 TextAlignment="Center"
+                 VerticalContentAlignment="Center"
+                 Background="{DynamicResource SearchBoxBackground}"
+                 Foreground="{DynamicResource PrimaryText}"
+                 BorderBrush="{DynamicResource SearchBoxBorder}"
+                 PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                 GotFocus="HotkeyBox_GotFocus"
+                 LostFocus="HotkeyBox_LostFocus"/>
+
+        <TextBlock Text="Click the box and press your desired key combination (must include Ctrl, Alt, or Shift)."
+                   FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
                    Foreground="{DynamicResource InactiveText}"/>
 
         <Separator Margin="0,16,0,12"
