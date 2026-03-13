@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
@@ -27,6 +28,25 @@ public enum FamilyNavigationStage
 {
     FamilyLevel,
     TypeLevel
+}
+
+/// <summary>
+/// ObservableCollection that supports bulk replacement with a single Reset notification.
+/// Avoids per-item UI updates when repopulating large lists.
+/// </summary>
+public class BulkObservableCollection<T> : ObservableCollection<T>
+{
+    /// <summary>
+    /// Replaces all items with the given list, firing a single CollectionChanged Reset.
+    /// </summary>
+    public void ReplaceAll(IList<T> items)
+    {
+        Items.Clear();
+        foreach (var item in items)
+            Items.Add(item);
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        OnPropertyChanged(new PropertyChangedEventArgs("Count"));
+    }
 }
 
 /// <summary>
@@ -82,16 +102,16 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>
     /// The display text for the mode pill chip inside the search box.
     /// </summary>
-    public string? ModePillText => ActiveMode switch
+    public string ModePillText => ActiveMode switch
     {
         ActiveMode.Place => "PLACE",
         ActiveMode.Edit => "EDIT",
         ActiveMode.Command => "CMD",
         ActiveMode.Shebang => "SHEBANG",
-        _ => null
+        _ => "BROWSER"
     };
 
-    public bool HasModePill => ActiveMode != ActiveMode.Browser;
+    public bool HasModePill => true;
 
     /// <summary>
     /// Called by the view when the user types a prefix character.
@@ -322,24 +342,14 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         ? ParseFamilyInput().query
         : _searchText;
 
-    public ObservableCollection<BrowserItem> Results { get; } = new();
-    public ObservableCollection<BrowserItem> Favorites { get; } = new();
-    public ObservableCollection<BrowserItem> RecentItems { get; } = new();
+    public BulkObservableCollection<BrowserItem> Results { get; } = new();
+    public BulkObservableCollection<BrowserItem> Favorites { get; } = new();
+    public BulkObservableCollection<BrowserItem> RecentItems { get; } = new();
 
     public event Action<BrowserItem>? ItemSelectionRequested;
     public event Action<BrowserItem>? ItemOpenRequested;
     public event Action? FavoritesChanged;
     public event Action? FocusSearchRequested;
-
-    /// <summary>
-    /// Fired when mode changes, so the view can animate the crossfade.
-    /// </summary>
-    public event Action? ModeChanged;
-
-    /// <summary>
-    /// Fired when family navigation stage changes, so the view can animate.
-    /// </summary>
-    public event Action? FamilyStageChanged;
 
     public void RequestFocusSearch()
     {
@@ -358,10 +368,15 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         if (_cachedUnifiedList != null) return _cachedUnifiedList;
 
         var list = new List<BrowserItem>(Favorites.Count + Results.Count);
-        foreach (var fav in Favorites) list.Add(fav);
+        // Only include favorites in Browser mode (they're hidden in other modes)
+        if (ShowFavorites)
+        {
+            foreach (var fav in Favorites) list.Add(fav);
+        }
         foreach (var res in Results)
         {
-            if (!res.IsFavorite) list.Add(res);
+            if (ShowFavorites && res.IsFavorite) continue;
+            list.Add(res);
         }
         _cachedUnifiedList = list;
         return list;
@@ -501,7 +516,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public void RefreshResults()
     {
         _cachedUnifiedList = null;
-        Results.Clear();
 
         if (IsShebangMode)
         {
@@ -509,10 +523,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             var filtered = FuzzyMatcher.Match(_shebangItems, query);
 
             foreach (var item in filtered)
-            {
                 item.GroupKey = "COMMANDS";
-                Results.Add(item);
-            }
+
+            Results.ReplaceAll(filtered);
 
             StatusText = string.IsNullOrWhiteSpace(query)
                 ? $"{_shebangItems.Count} commands"
@@ -525,17 +538,17 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             var filtered = FuzzyMatcher.Match(_commandItems, query);
             int totalMatched = filtered.Count;
 
-            // Group by ribbon tab
+            // Group by ribbon tab — "Revit Command" always first
             var grouped = filtered
                 .Take(MaxResults)
-                .OrderBy(i => i.RibbonTab ?? "Other")
+                .OrderBy(i => string.Equals(i.RibbonTab, "Revit Command", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(i => i.RibbonTab ?? "Other")
                 .ToList();
 
             foreach (var item in grouped)
-            {
                 item.GroupKey = item.RibbonTab?.ToUpperInvariant() ?? "OTHER";
-                Results.Add(item);
-            }
+
+            Results.ReplaceAll(grouped);
 
             StatusText = string.IsNullOrWhiteSpace(query)
                 ? $"{_commandItems.Count} commands"
@@ -553,8 +566,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             {
                 // Empty search: show recent items instead of full list
                 RefreshRecentItems();
-                foreach (var item in RecentItems)
-                    Results.Add(item);
+                var recentList = new List<BrowserItem>(RecentItems);
+                Results.ReplaceAll(recentList);
 
                 StatusText = RecentItems.Count > 0
                     ? $"{_allItems.Count} items · {RecentItems.Count} recent"
@@ -574,20 +587,13 @@ public class FinderPaneViewModel : INotifyPropertyChanged
                     .ThenBy(i => i.GroupKey)
                     .ToList();
 
-                foreach (var item in grouped)
-                    Results.Add(item);
+                Results.ReplaceAll(grouped);
 
                 StatusText = BuildBrowserStatusText(grouped, totalMatched);
                 HighlightedItem = Results.Count > 0 ? Results[0] : null;
             }
         }
 
-        OnPropertyChanged(nameof(IsFamilyMode));
-        OnPropertyChanged(nameof(IsEditFamilyMode));
-        OnPropertyChanged(nameof(IsPlaceFamilyMode));
-        OnPropertyChanged(nameof(IsCommandMode));
-        OnPropertyChanged(nameof(IsShebangMode));
-        OnPropertyChanged(nameof(IsBrowserMode));
         OnPropertyChanged(nameof(ShowFavorites));
         OnPropertyChanged(nameof(IsEmptyState));
     }
@@ -614,8 +620,10 @@ public class FinderPaneViewModel : INotifyPropertyChanged
                 .Where(i => i.FamilyName == SelectedFamilyForDrilldown)
                 .ToList();
 
+            var resultList = new List<BrowserItem>();
+
             // Add back row
-            var backRow = new BrowserItem
+            resultList.Add(new BrowserItem
             {
                 Name = $"\u2190 {SelectedFamilyForDrilldown}",
                 Category = "",
@@ -623,14 +631,15 @@ public class FinderPaneViewModel : INotifyPropertyChanged
                 Kind = BrowserItemKind.FamilyType,
                 IsBackRow = true,
                 GroupKey = SelectedFamilyForDrilldown.ToUpperInvariant()
-            };
-            Results.Add(backRow);
+            });
 
             foreach (var item in types)
             {
                 item.GroupKey = SelectedFamilyForDrilldown.ToUpperInvariant();
-                Results.Add(item);
+                resultList.Add(item);
             }
+
+            Results.ReplaceAll(resultList);
 
             StatusText = $"{types.Count} types in {SelectedFamilyForDrilldown}";
             HighlightedItem = Results.Count > 1 ? Results[1] : (Results.Count > 0 ? Results[0] : null);
@@ -642,6 +651,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             int totalMatched = filtered.Count;
 
             // Group by family name, create summary rows
+            var resultList = new List<BrowserItem>();
             var familyGroups = filtered
                 .GroupBy(i => new { i.FamilyName, i.Category })
                 .OrderBy(g => g.Key.Category, StringComparer.OrdinalIgnoreCase)
@@ -651,7 +661,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             foreach (var group in familyGroups)
             {
                 var first = group.First();
-                var summaryItem = new BrowserItem
+                resultList.Add(new BrowserItem
                 {
                     Name = group.Key.FamilyName ?? first.Name,
                     Category = group.Key.Category ?? "Family",
@@ -660,9 +670,10 @@ public class FinderPaneViewModel : INotifyPropertyChanged
                     FamilyName = group.Key.FamilyName,
                     TypeCount = group.Count(),
                     GroupKey = (group.Key.Category ?? "FAMILY").ToUpperInvariant()
-                };
-                Results.Add(summaryItem);
+                });
             }
+
+            Results.ReplaceAll(resultList);
 
             var statusParts = new List<string> { editMode ? "Edit Mode" : "Place Mode" };
             if (!string.IsNullOrEmpty(categoryFilter))
@@ -693,9 +704,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     private void RefreshFavorites()
     {
         _cachedUnifiedList = null;
-        Favorites.Clear();
-        foreach (var item in _allItems.Where(i => i.IsFavorite))
-            Favorites.Add(item);
+        Favorites.ReplaceAll(_allItems.Where(i => i.IsFavorite).ToList());
         HasFavorites = Favorites.Count > 0;
     }
 

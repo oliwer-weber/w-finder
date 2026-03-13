@@ -38,8 +38,9 @@
     <SolidColorBrush x:Key="ScrollThumbHover"      Color="#5a6880"/>
 
     <!-- Mode pill colors -->
-    <SolidColorBrush x:Key="PillText"              Color="#b1bbc8"/>
+    <SolidColorBrush x:Key="PillText"              Color="#d5d9e2"/>
     <SolidColorBrush x:Key="PillBorder"            Color="#434e61"/>
+    <SolidColorBrush x:Key="BrowserPillText"       Color="#5d7080"/>
     <Color x:Key="PlaceAccentColor">#4a7c59</Color>
     <Color x:Key="EditAccentColor">#6b5ea8</Color>
     <Color x:Key="CommandAccentColor">#8a6d3b</Color>
