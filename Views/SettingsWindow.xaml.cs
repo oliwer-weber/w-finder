@@ -28,6 +28,11 @@ public partial class SettingsWindow : Window
         _hotkeyKey = s.HotkeyKey;
         _hotkeyModifiers = s.HotkeyModifiers;
         HotkeyBox.Text = GlobalKeyboardHook.FormatHotkey(_hotkeyModifiers, _hotkeyKey);
+
+        LaunchBehaviorCombo.SelectedIndex = s.LaunchBehavior;
+        DefaultModeCombo.SelectedIndex = s.DefaultMode;
+        // Default mode panel only visible when "Clean slate" is selected
+        DefaultModePanel.Visibility = s.LaunchBehavior == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -98,6 +103,13 @@ public partial class SettingsWindow : Window
         HotkeyBox.Text = GlobalKeyboardHook.FormatHotkey(_hotkeyModifiers, _hotkeyKey);
     }
 
+    private void LaunchBehaviorCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        // Only show the default mode picker when "Clean slate" is selected
+        if (DefaultModePanel != null)
+            DefaultModePanel.Visibility = LaunchBehaviorCombo.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private void SaveBtn_Click(object sender, RoutedEventArgs e)
     {
         var settings = new QuipSettings
@@ -106,7 +118,9 @@ public partial class SettingsWindow : Window
             DefaultExportPath = ExportPathBox.Text,
             FilterPlacedTypesOnly = FilterPlacedCheck.IsChecked == true,
             HotkeyKey = _hotkeyKey,
-            HotkeyModifiers = _hotkeyModifiers
+            HotkeyModifiers = _hotkeyModifiers,
+            LaunchBehavior = LaunchBehaviorCombo.SelectedIndex,
+            DefaultMode = DefaultModeCombo.SelectedIndex
         };
 
         SettingsService.Save(settings);

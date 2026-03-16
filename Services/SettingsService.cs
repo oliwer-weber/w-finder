@@ -40,7 +40,11 @@ public static class SettingsService
         DefaultExportPath = _settings.DefaultExportPath,
         FilterPlacedTypesOnly = _settings.FilterPlacedTypesOnly,
         HotkeyKey = _settings.HotkeyKey,
-        HotkeyModifiers = _settings.HotkeyModifiers
+        HotkeyModifiers = _settings.HotkeyModifiers,
+        LaunchBehavior = _settings.LaunchBehavior,
+        DefaultMode = _settings.DefaultMode,
+        LastActiveMode = _settings.LastActiveMode,
+        LastSearchText = _settings.LastSearchText
     };
 
     /// <summary>
@@ -60,6 +64,23 @@ public static class SettingsService
             // Silently fail — same pattern as old ThemeService
         }
         SettingsChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Saves the current mode and search text so they can be restored on next launch.
+    /// Does NOT fire SettingsChanged — this is a silent background save.
+    /// </summary>
+    public static void SaveLastState(int mode, string searchText)
+    {
+        _settings.LastActiveMode = mode;
+        _settings.LastSearchText = searchText;
+        try
+        {
+            Directory.CreateDirectory(SettingsDir);
+            var json = JsonSerializer.Serialize(_settings, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(SettingsFile, json);
+        }
+        catch { }
     }
 
     private static void Load()
@@ -92,6 +113,9 @@ public static class SettingsService
     }
 }
 
+public enum LaunchBehavior { CleanSlate = 0, RememberMode = 1, RememberAll = 2 }
+public enum DefaultLaunchMode { Browser = 0, Place = 1, Command = 2, Shebang = 3 }
+
 /// <summary>
 /// All Quip user preferences. Add new settings here as needed.
 /// </summary>
@@ -106,4 +130,16 @@ public class QuipSettings
 
     /// <summary>Modifier flags for the global hotkey. Default: 0x02 = Ctrl. (Ctrl=0x02, Alt=0x01, Shift=0x04)</summary>
     public int HotkeyModifiers { get; set; } = 0x02;
+
+    /// <summary>What to restore when the pane opens. 0=CleanSlate, 1=RememberMode, 2=RememberAll.</summary>
+    public int LaunchBehavior { get; set; }
+
+    /// <summary>Default mode when LaunchBehavior is CleanSlate. 0=Browser, 1=Place, 2=Command, 3=Shebang.</summary>
+    public int DefaultMode { get; set; }
+
+    /// <summary>Last active mode (saved on pane hide for restore).</summary>
+    public int LastActiveMode { get; set; }
+
+    /// <summary>Last search text (saved on pane hide for restore).</summary>
+    public string LastSearchText { get; set; } = string.Empty;
 }

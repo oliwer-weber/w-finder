@@ -507,7 +507,7 @@
                                     </Style.Triggers>
                                 </Style>
                             </StackPanel.Style>
-                            <TextBlock Text="{Binding TypeCount, StringFormat='{}{0} types'}"
+                            <TextBlock Text="{Binding TypeCountLabel}"
                                        FontSize="10"
                                        Foreground="{DynamicResource MutedText}"
                                        VerticalAlignment="Center"

@@ -64,7 +64,7 @@ public static class CommandCollector
                 Kind = BrowserItemKind.Command,
                 CommandName = enumName,
                 RevitCommandId = revitCmdId,
-                ShortcutKeys = shortcutKeys,
+                ShortcutKeys = shortcutKeys ?? "-",
                 RibbonTab = "Revit Command"
             });
         }
@@ -93,7 +93,7 @@ public static class CommandCollector
                 Kind = BrowserItemKind.Command,
                 CommandName = null, // not a PostableCommand
                 RevitCommandId = entry.CommandId,
-                ShortcutKeys = shortcut,
+                ShortcutKeys = shortcut ?? "-",
                 RibbonTab = ExtractRibbonTab(entry.Paths)
             });
         }
