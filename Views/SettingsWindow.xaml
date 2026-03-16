@@ -75,6 +75,50 @@
         <Separator Margin="0,12,0,12"
                    Background="{DynamicResource SeparatorBrush}"/>
 
+        <!-- ═══ Launch Behavior ═══ -->
+        <TextBlock Text="LAUNCH BEHAVIOR"
+                   FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"
+                   Foreground="{DynamicResource SecondaryText}"/>
+
+        <TextBlock Text="When Quip opens:"
+                   FontSize="12" Margin="0,0,0,6"
+                   Foreground="{DynamicResource PrimaryText}"/>
+
+        <ComboBox x:Name="LaunchBehaviorCombo"
+                  FontSize="13" Padding="6,4" Margin="0,0,0,4"
+                  Background="{DynamicResource SearchBoxBackground}"
+                  Foreground="{DynamicResource PrimaryText}"
+                  BorderBrush="{DynamicResource SearchBoxBorder}"
+                  SelectionChanged="LaunchBehaviorCombo_SelectionChanged">
+            <ComboBoxItem Content="Clean slate"/>
+            <ComboBoxItem Content="Remember last mode"/>
+            <ComboBoxItem Content="Remember mode + search text"/>
+        </ComboBox>
+
+        <StackPanel x:Name="DefaultModePanel" Margin="0,8,0,0">
+            <TextBlock Text="Default mode:"
+                       FontSize="12" Margin="0,0,0,6"
+                       Foreground="{DynamicResource PrimaryText}"/>
+
+            <ComboBox x:Name="DefaultModeCombo"
+                      FontSize="13" Padding="6,4"
+                      Background="{DynamicResource SearchBoxBackground}"
+                      Foreground="{DynamicResource PrimaryText}"
+                      BorderBrush="{DynamicResource SearchBoxBorder}">
+                <ComboBoxItem Content="Browser"/>
+                <ComboBoxItem Content="Place  (>)"/>
+                <ComboBoxItem Content="Command  (:)"/>
+                <ComboBoxItem Content="Shebang  (!)"/>
+            </ComboBox>
+        </StackPanel>
+
+        <TextBlock Text="Clean slate resets each time. Use 'default mode' to always start in a specific mode — you can backspace to get back to Browser."
+                   FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
+                   Foreground="{DynamicResource InactiveText}"/>
+
+        <Separator Margin="0,12,0,12"
+                   Background="{DynamicResource SeparatorBrush}"/>
+
         <!-- ═══ Global Hotkey ═══ -->
         <TextBlock Text="GLOBAL HOTKEY"
                    FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"

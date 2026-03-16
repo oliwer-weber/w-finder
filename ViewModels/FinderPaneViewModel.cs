@@ -152,6 +152,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         {
             _searchText = value;
             _cachedFamilyInput = null;
+            ExitChipNavigation();
 
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsEmptyState));
@@ -215,6 +216,61 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// Available categories for Place mode empty state chips.
     /// </summary>
     public ObservableCollection<string> AvailableCategories { get; } = new();
+
+    // ── Chip Navigation ──────────────────────────────────────────────
+
+    private bool _isChipNavigationActive;
+    public bool IsChipNavigationActive
+    {
+        get => _isChipNavigationActive;
+        set { _isChipNavigationActive = value; OnPropertyChanged(); }
+    }
+
+    private int _focusedChipIndex = -1;
+    public int FocusedChipIndex
+    {
+        get => _focusedChipIndex;
+        set { _focusedChipIndex = value; OnPropertyChanged(); }
+    }
+
+    private bool _areCategoryChipsExpanded;
+    public bool AreCategoryChipsExpanded
+    {
+        get => _areCategoryChipsExpanded;
+        set { _areCategoryChipsExpanded = value; OnPropertyChanged(); }
+    }
+
+    public int VisibleChipCount { get; set; }
+
+    public void EnterChipNavigation()
+    {
+        if (VisibleChipCount <= 0) return;
+        IsChipNavigationActive = true;
+        FocusedChipIndex = 0;
+        HighlightedItem = null;
+    }
+
+    public void ExitChipNavigation()
+    {
+        IsChipNavigationActive = false;
+        FocusedChipIndex = -1;
+    }
+
+    /// <summary>
+    /// Moves chip focus left or right. Returns false if at boundary.
+    /// </summary>
+    public bool MoveChipFocus(int direction)
+    {
+        int newIndex = FocusedChipIndex + direction;
+        if (newIndex < 0 || newIndex >= VisibleChipCount) return false;
+        FocusedChipIndex = newIndex;
+        return true;
+    }
+
+    public void ExpandCategoryChips()
+    {
+        AreCategoryChipsExpanded = true;
+    }
 
     // ── Two-Stage Family Navigation ─────────────────────────────────
 
@@ -316,6 +372,39 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     {
         SearchText = string.Empty;
         HighlightedItem = null;
+        FocusSearchRequested?.Invoke();
+    }
+
+    /// <summary>
+    /// Restores a previously saved mode and search text on pane open.
+    /// </summary>
+    public void RestoreState(ActiveMode mode, string searchText)
+    {
+        if (mode != ActiveMode.Browser)
+            ActiveMode = mode;
+        else
+            ActiveMode = ActiveMode.Browser;
+
+        _searchText = searchText;
+        _cachedFamilyInput = null;
+        OnPropertyChanged(nameof(SearchText));
+        HighlightedItem = null;
+        _debounceTimer.Stop();
+        RefreshResults();
+        FocusSearchRequested?.Invoke();
+    }
+
+    /// <summary>
+    /// Activates a default mode on pane open (for "Clean slate" with a non-Browser default).
+    /// </summary>
+    public void ActivateDefaultMode(ActiveMode mode)
+    {
+        if (mode == ActiveMode.Browser)
+        {
+            RequestFocusSearch();
+            return;
+        }
+        ActivateMode(mode);
         FocusSearchRequested?.Invoke();
     }
 
@@ -557,6 +646,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
         OnPropertyChanged(nameof(ShowFavorites));
         OnPropertyChanged(nameof(IsEmptyState));
+
+        if (!IsEmptyState)
+            ExitChipNavigation();
     }
 
     private void RefreshFamilyResults()
@@ -602,7 +694,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
             Results.ReplaceAll(resultList);
 
-            StatusText = $"{types.Count} types in {SelectedFamilyForDrilldown}";
+            StatusText = $"{types.Count} {(types.Count == 1 ? "type" : "types")} in {SelectedFamilyForDrilldown}";
             HighlightedItem = Results.Count > 1 ? Results[1] : (Results.Count > 0 ? Results[0] : null);
         }
         else
@@ -643,7 +735,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
             StatusText = string.IsNullOrWhiteSpace(query)
                 ? $"{prefix} \u2014 {Results.Count} families"
-                : $"{prefix} \u2014 {Results.Count} families ({totalMatched} types)";
+                : $"{prefix} \u2014 {Results.Count} families ({totalMatched} {(totalMatched == 1 ? "type" : "types")})";
             HighlightedItem = Results.Count > 0 ? Results[0] : null;
         }
     }
@@ -653,6 +745,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// </summary>
     public void ApplyCategoryFilter(string category)
     {
+        ExitChipNavigation();
+
         if (ActiveMode != ActiveMode.Place)
             ActivateMode(ActiveMode.Place);
 
@@ -927,7 +1021,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         RenameItem = item;
         IsSheetRename = false;
         IsShortcutEditMode = true;
-        RenameText = item.ShortcutKeys ?? string.Empty;
+        RenameText = (item.ShortcutKeys == "-") ? string.Empty : (item.ShortcutKeys ?? string.Empty);
 
         IsInlineRenameVisible = true;
         FocusRenameRequested?.Invoke();

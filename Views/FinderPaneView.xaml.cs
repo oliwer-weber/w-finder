@@ -184,15 +184,17 @@ public partial class FinderPaneView : UserControl
     private void PopulateCategoryChips()
     {
         CategoryChipsPanel.Children.Clear();
-        int maxChips = 6;
+        var vm = App.ViewModel;
+        int maxChips = vm.AreCategoryChipsExpanded ? vm.AvailableCategories.Count : 6;
         int shown = 0;
 
-        foreach (var cat in App.ViewModel.AvailableCategories)
+        foreach (var cat in vm.AvailableCategories)
         {
             if (shown >= maxChips) break;
 
             var chip = new Border
             {
+                Tag = shown,
                 CornerRadius = new CornerRadius(2),
                 Padding = new Thickness(8, 3, 8, 3),
                 Margin = new Thickness(0, 0, 4, 4),
@@ -208,23 +210,66 @@ public partial class FinderPaneView : UserControl
             };
 
             var category = cat; // capture for lambda
-            chip.MouseLeftButtonDown += (_, _) => App.ViewModel.ApplyCategoryFilter(category);
+            chip.MouseLeftButtonDown += (_, _) => vm.ApplyCategoryFilter(category);
             CategoryChipsPanel.Children.Add(chip);
             shown++;
         }
 
-        // Show overflow count if needed
-        int remaining = App.ViewModel.AvailableCategories.Count - shown;
-        if (remaining > 0)
+        // Show overflow count if needed (and not already expanded)
+        int remaining = vm.AvailableCategories.Count - shown;
+        if (remaining > 0 && !vm.AreCategoryChipsExpanded)
         {
-            CategoryChipsPanel.Children.Add(new TextBlock
+            var moreElement = new Border
             {
-                Text = $"+{remaining} more",
-                FontSize = 10,
-                Foreground = (Brush)FindResource("MutedText"),
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(4, 0, 0, 4)
-            });
+                Tag = shown,
+                CornerRadius = new CornerRadius(2),
+                Padding = new Thickness(8, 3, 8, 3),
+                Margin = new Thickness(0, 0, 4, 4),
+                Background = (Brush)FindResource("ItemHoverBackground"),
+                Cursor = Cursors.Hand,
+                Child = new TextBlock
+                {
+                    Text = $"+{remaining} more",
+                    FontSize = 10,
+                    Foreground = (Brush)FindResource("MutedText"),
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            moreElement.MouseLeftButtonDown += (_, _) =>
+            {
+                vm.ExpandCategoryChips();
+                PopulateCategoryChips();
+                UpdateChipHighlight();
+            };
+            CategoryChipsPanel.Children.Add(moreElement);
+            shown++;
+        }
+
+        vm.VisibleChipCount = shown;
+    }
+
+    private void UpdateChipHighlight()
+    {
+        var vm = App.ViewModel;
+        var accentColor = (WpfColor)FindResource("PlaceAccentColor");
+        var focusBrush = new SolidColorBrush(accentColor);
+        var defaultBrush = (Brush)FindResource("ItemHoverBackground");
+        var defaultTextBrush = (Brush)FindResource("PrimaryText");
+        var mutedTextBrush = (Brush)FindResource("MutedText");
+
+        foreach (var child in CategoryChipsPanel.Children)
+        {
+            if (child is Border border && border.Tag is int idx)
+            {
+                bool isFocused = vm.IsChipNavigationActive && idx == vm.FocusedChipIndex;
+                border.Background = isFocused ? focusBrush : defaultBrush;
+                if (border.Child is TextBlock tb)
+                {
+                    // The "+x more" chip has MutedText foreground by default
+                    bool isOverflow = idx >= Math.Min(6, vm.AvailableCategories.Count);
+                    tb.Foreground = isFocused ? Brushes.White : (isOverflow ? mutedTextBrush : defaultTextBrush);
+                }
+            }
         }
     }
 
@@ -267,6 +312,13 @@ public partial class FinderPaneView : UserControl
                 ? new SolidColorBrush(WpfColor.FromRgb(0x2E, 0x7D, 0x32))
                 : new SolidColorBrush(WpfColor.FromRgb(0xE6, 0x86, 0x0A));
             PositionOverlay(InlineErrorPopup);
+            return;
+        }
+
+        if (e.PropertyName == nameof(FinderPaneViewModel.FocusedChipIndex)
+            || e.PropertyName == nameof(FinderPaneViewModel.IsChipNavigationActive))
+        {
+            UpdateChipHighlight();
             return;
         }
 
@@ -399,6 +451,7 @@ public partial class FinderPaneView : UserControl
         {
             SearchBox.Focus();
             Keyboard.Focus(SearchBox);
+            SearchBox.CaretIndex = SearchBox.Text.Length;
         });
     }
 
@@ -458,14 +511,27 @@ public partial class FinderPaneView : UserControl
         switch (e.Key)
         {
             case Key.Back:
-                // Backspace on empty text with a colored mode pill → deactivate to Browser
-                if (string.IsNullOrEmpty(App.ViewModel.SearchText) && App.ViewModel.ActiveMode != ActiveMode.Browser)
+                // Backspace on empty text → navigate back one level
+                if (string.IsNullOrEmpty(App.ViewModel.SearchText))
                 {
-                    e.Handled = true;
-                    App.ViewModel.DeactivateMode();
-                    UpdateModePillAccent();
-                    UpdateEmptyState();
-                    UpdateResultGrouping();
+                    if (App.ViewModel.IsActionBarVisible)
+                    {
+                        e.Handled = true;
+                        App.ViewModel.CloseActionBar();
+                    }
+                    else if (App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.TypeLevel)
+                    {
+                        e.Handled = true;
+                        App.ViewModel.NavigateBackToFamilies();
+                    }
+                    else if (App.ViewModel.ActiveMode != ActiveMode.Browser)
+                    {
+                        e.Handled = true;
+                        App.ViewModel.DeactivateMode();
+                        UpdateModePillAccent();
+                        UpdateEmptyState();
+                        UpdateResultGrouping();
+                    }
                 }
                 break;
 
@@ -479,25 +545,10 @@ public partial class FinderPaneView : UserControl
                 {
                     App.ViewModel.ClearInlineError();
                 }
-                else if (App.ViewModel.IsActionBarVisible)
-                {
-                    App.ViewModel.CloseActionBar();
-                }
-                else if (App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.TypeLevel)
-                {
-                    // Escape in Stage 2 → back to Stage 1
-                    App.ViewModel.NavigateBackToFamilies();
-                }
-                else if (App.ViewModel.ActiveMode != ActiveMode.Browser)
-                {
-                    // Escape with a colored mode pill → clear and return to Browser
-                    App.ViewModel.DeactivateMode();
-                    UpdateModePillAccent();
-                    UpdateEmptyState();
-                    UpdateResultGrouping();
-                }
                 else
                 {
+                    // Universal close — save state, then hide
+                    SettingsService.SaveLastState((int)App.ViewModel.ActiveMode, App.ViewModel.SearchText);
                     RevitBackgroundTask.Raise(uiApp =>
                     {
                         var pane = uiApp.GetDockablePane(App.PaneId);
@@ -518,9 +569,35 @@ public partial class FinderPaneView : UserControl
                     App.ViewModel.ExecuteAction();
                     break;
                 }
+                if (App.ViewModel.IsChipNavigationActive)
+                {
+                    int chipIdx = App.ViewModel.FocusedChipIndex;
+                    int maxVisible = App.ViewModel.AreCategoryChipsExpanded
+                        ? App.ViewModel.AvailableCategories.Count
+                        : Math.Min(6, App.ViewModel.AvailableCategories.Count);
+
+                    if (chipIdx < maxVisible)
+                    {
+                        App.ViewModel.ApplyCategoryFilter(App.ViewModel.AvailableCategories[chipIdx]);
+                        UpdateEmptyState();
+                        UpdateResultGrouping();
+                    }
+                    else
+                    {
+                        // "+x more" — expand all chips
+                        App.ViewModel.ExpandCategoryChips();
+                        PopulateCategoryChips();
+                        App.ViewModel.FocusedChipIndex = Math.Min(chipIdx, App.ViewModel.VisibleChipCount - 1);
+                        UpdateChipHighlight();
+                    }
+                    break;
+                }
                 var highlighted = App.ViewModel.HighlightedItem;
                 if (highlighted != null)
                 {
+                    // Save state before executing (pane may hide)
+                    SettingsService.SaveLastState((int)App.ViewModel.ActiveMode, App.ViewModel.SearchText);
+
                     // Two-stage family nav: drill into family at Stage 1
                     if (App.ViewModel.IsFamilyMode
                         && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
@@ -684,6 +761,12 @@ public partial class FinderPaneView : UserControl
                 break;
 
             case Key.Right:
+                if (App.ViewModel.IsChipNavigationActive)
+                {
+                    e.Handled = true;
+                    App.ViewModel.MoveChipFocus(+1);
+                    break;
+                }
                 // In family mode Stage 1 with action bar not open, drill into family
                 if (!App.ViewModel.IsActionBarVisible
                     && App.ViewModel.IsFamilyMode
@@ -702,21 +785,66 @@ public partial class FinderPaneView : UserControl
                 }
                 break;
 
-            case Key.Left when App.ViewModel.IsActionBarVisible:
-                e.Handled = true;
-                App.ViewModel.MoveActionFocus(-1);
+            case Key.Left:
+                if (App.ViewModel.IsChipNavigationActive)
+                {
+                    e.Handled = true;
+                    App.ViewModel.MoveChipFocus(-1);
+                }
+                else if (App.ViewModel.IsActionBarVisible)
+                {
+                    e.Handled = true;
+                    App.ViewModel.MoveActionFocus(-1);
+                }
                 break;
 
             case Key.Down:
                 e.Handled = true;
-                App.ViewModel.MoveHighlight(+1);
-                ScrollHighlightedIntoView();
+                if (App.ViewModel.IsChipNavigationActive)
+                {
+                    // Down from chips → exit chips, enter results
+                    App.ViewModel.ExitChipNavigation();
+                    App.ViewModel.MoveHighlight(+1);
+                    ScrollHighlightedIntoView();
+                }
+                else if (App.ViewModel.IsEmptyState
+                         && App.ViewModel.ActiveMode == ActiveMode.Place
+                         && App.ViewModel.HighlightedItem == null
+                         && App.ViewModel.VisibleChipCount > 0)
+                {
+                    // Down from search box in Place empty state → enter chips
+                    App.ViewModel.EnterChipNavigation();
+                }
+                else
+                {
+                    App.ViewModel.MoveHighlight(+1);
+                    ScrollHighlightedIntoView();
+                }
                 break;
 
             case Key.Up:
                 e.Handled = true;
-                App.ViewModel.MoveHighlight(-1);
-                ScrollHighlightedIntoView();
+                if (App.ViewModel.IsChipNavigationActive)
+                {
+                    // Up from chips → back to search box
+                    App.ViewModel.ExitChipNavigation();
+                }
+                else if (App.ViewModel.IsEmptyState
+                         && App.ViewModel.ActiveMode == ActiveMode.Place
+                         && App.ViewModel.VisibleChipCount > 0
+                         && App.ViewModel.HighlightedItem != null
+                         && App.ViewModel.Results.Count > 0
+                         && App.ViewModel.HighlightedItem == App.ViewModel.Results[0])
+                {
+                    // Up from top of results in Place empty state → enter chips at last chip
+                    App.ViewModel.EnterChipNavigation();
+                    App.ViewModel.FocusedChipIndex = App.ViewModel.VisibleChipCount - 1;
+                }
+                else
+                {
+                    App.ViewModel.MoveHighlight(-1);
+                    ScrollHighlightedIntoView();
+                }
                 break;
 
             case Key.F2 when App.ViewModel.IsActionBarVisible:
@@ -806,6 +934,9 @@ public partial class FinderPaneView : UserControl
 
     private void OnItemOpenRequested(BrowserItem item)
     {
+        // Save state before executing (pane may hide)
+        SettingsService.SaveLastState((int)App.ViewModel.ActiveMode, App.ViewModel.SearchText);
+
         if (App.ViewModel.IsShebangMode && item.Kind == BrowserItemKind.Shebang)
         {
             var shebangId = item.CommandName;
@@ -1192,7 +1323,7 @@ public partial class FinderPaneView : UserControl
         var success = KeyboardShortcutService.AssignShortcut(commandId, trimmed);
         if (success)
         {
-            item.ShortcutKeys = KeyboardShortcutService.GetShortcutByCommandId(commandId);
+            item.ShortcutKeys = KeyboardShortcutService.GetShortcutByCommandId(commandId) ?? "-";
             CommandCollector.Invalidate();
             App.ViewModel.ShowInlineError("Shortcut saved — takes effect next Revit session");
         }
@@ -1217,7 +1348,7 @@ public partial class FinderPaneView : UserControl
             return;
         }
 
-        if (string.IsNullOrEmpty(item.ShortcutKeys))
+        if (string.IsNullOrEmpty(item.ShortcutKeys) || item.ShortcutKeys == "-")
         {
             App.ViewModel.ShowInlineError("No shortcut assigned");
             return;
@@ -1226,7 +1357,7 @@ public partial class FinderPaneView : UserControl
         var success = KeyboardShortcutService.RemoveShortcut(commandId);
         if (success)
         {
-            item.ShortcutKeys = null;
+            item.ShortcutKeys = "-";
             CommandCollector.Invalidate();
             App.ViewModel.ShowInlineError("Shortcut removed — takes effect next Revit session");
         }

@@ -35,7 +35,7 @@ public static class QuickActionResolver
     private static List<QuickAction> BuildCommandActions(BrowserItem item)
     {
         var actions = new List<QuickAction> { SetShortcut };
-        if (!string.IsNullOrEmpty(item.ShortcutKeys))
+        if (!string.IsNullOrEmpty(item.ShortcutKeys) && item.ShortcutKeys != "-")
             actions.Add(ClearShortcut);
         return actions;
     }

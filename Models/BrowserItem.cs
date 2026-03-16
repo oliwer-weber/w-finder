@@ -83,6 +83,9 @@ public class BrowserItem : INotifyPropertyChanged
     /// </summary>
     public int TypeCount { get; set; }
 
+    /// <summary>Plural-aware label like "3 types" or "1 type".</summary>
+    public string TypeCountLabel => TypeCount == 1 ? "1 type" : $"{TypeCount} types";
+
     /// <summary>
     /// True if this is a synthetic "back" row in two-stage family navigation.
     /// </summary>

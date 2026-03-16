@@ -2,6 +2,7 @@ using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using w_finder.Services;
+using w_finder.ViewModels;
 
 namespace w_finder;
 
@@ -28,6 +29,8 @@ public class FinderCommand : IExternalCommand
 
         if (pane.IsShown())
         {
+            // Save current state before hiding (for "remember" launch behaviors)
+            SettingsService.SaveLastState((int)App.ViewModel.ActiveMode, App.ViewModel.SearchText);
             pane.Hide();
         }
         else
@@ -53,10 +56,25 @@ public class FinderCommand : IExternalCommand
             App.ViewModel.LoadShebangs(ShebangService.Collect());
 
             // Apply current settings
-            App.ViewModel.FilterPlacedTypes = SettingsService.Current.FilterPlacedTypesOnly;
+            var settings = SettingsService.Current;
+            App.ViewModel.FilterPlacedTypes = settings.FilterPlacedTypesOnly;
 
+            App.ViewModel.AreCategoryChipsExpanded = false;
             pane.Show();
-            App.ViewModel.RequestFocusSearch();
+
+            // Apply launch behavior
+            switch ((LaunchBehavior)settings.LaunchBehavior)
+            {
+                case LaunchBehavior.RememberMode:
+                    App.ViewModel.RestoreState((ActiveMode)settings.LastActiveMode, string.Empty);
+                    break;
+                case LaunchBehavior.RememberAll:
+                    App.ViewModel.RestoreState((ActiveMode)settings.LastActiveMode, settings.LastSearchText);
+                    break;
+                default: // CleanSlate
+                    App.ViewModel.ActivateDefaultMode((ActiveMode)settings.DefaultMode);
+                    break;
+            }
         }
     }
 }
