@@ -97,6 +97,12 @@ public class BrowserItem : INotifyPropertyChanged
     public string GroupKey { get; set; } = string.Empty;
 
     /// <summary>
+    /// Checkbox glyph for selection filter mode. Null when not in filter mode.
+    /// "☑" = checked, "☐" = unchecked, "▣" = partial (mixed children).
+    /// </summary>
+    public string? CheckGlyph { get; set; }
+
+    /// <summary>
     /// The ribbon tab this command belongs to (for Command mode grouping).
     /// </summary>
     public string? RibbonTab { get; init; }

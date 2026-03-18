@@ -16,17 +16,17 @@ public class ResetPaneCommand : IExternalCommand
     {
         try
         {
-            var dialog = new TaskDialog("Quip")
+            var dialog = new TaskDialog("Emergency Reset")
             {
                 MainInstruction = "Pane lost?",
-                MainContent = "Reset its position to default, then restart Revit. " +
+                MainContent = "Click OK to reset its position to default, then restart Revit. " +
                               "Your settings and data are untouched.",
-                CommonButtons = TaskDialogCommonButtons.Cancel,
+                CommonButtons = TaskDialogCommonButtons.Ok | TaskDialogCommonButtons.Cancel,
+                DefaultButton = TaskDialogResult.Cancel,
             };
-            dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Reset position");
 
             var result = dialog.Show();
-            if (result != TaskDialogResult.CommandLink1)
+            if (result != TaskDialogResult.Ok)
                 return Result.Cancelled;
 
             // Generate a brand-new GUID and persist it

@@ -204,7 +204,7 @@
 
     </UserControl.Resources>
 
-    <Grid Margin="8">
+    <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -212,10 +212,12 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Row 0: Search box with mode pill -->
         <Border Grid.Row="0"
+                Margin="8,8,8,0"
                 Background="{DynamicResource SearchBoxBackground}"
                 BorderBrush="{DynamicResource SearchBoxBorder}"
                 BorderThickness="1"
@@ -225,7 +227,7 @@
                 <Border x:Name="ModePillBorder"
                         DockPanel.Dock="Left"
                         Margin="4,3,0,3"
-                        Padding="3,1,5,1"
+                        Padding="5,1"
                         CornerRadius="2"
                         VerticalAlignment="Center">
                     <Border.Style>
@@ -240,6 +242,7 @@
                                FontSize="10"
                                FontFamily="Segoe UI"
                                Foreground="{DynamicResource PillText}"
+                               HorizontalAlignment="Center"
                                VerticalAlignment="Center"/>
                 </Border>
                 <!-- Search TextBox -->
@@ -261,10 +264,10 @@
                    FontSize="10"
                    Foreground="{DynamicResource MutedText}"
                    Text="{Binding StatusText}"
-                   Margin="4,4,4,2"/>
+                   Margin="12,4,12,2"/>
 
         <!-- Row 2: Browser mode hints (above favorites, close to search bar) -->
-        <StackPanel x:Name="BrowserHints" Grid.Row="2" Margin="4,4,4,0"
+        <StackPanel x:Name="BrowserHints" Grid.Row="2" Margin="12,4,12,0"
                     Visibility="Collapsed">
             <TextBlock FontSize="11" Foreground="{DynamicResource HintText}" Margin="0,2">
                 <Run Text="Type  "/><Run Text=">" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text="  to place families"/>
@@ -276,7 +279,7 @@
 
         <!-- Row 3: Favorites section -->
         <Border Grid.Row="3"
-                Margin="0,4"
+                Margin="8,4"
                 Background="{DynamicResource FavoritesBackground}"
                 CornerRadius="2"
                 Visibility="{Binding ShowFavorites, Converter={StaticResource BoolToVisibility}}">
@@ -326,7 +329,7 @@
         <Border x:Name="EmptyStatePanel"
                 Grid.Row="4"
                 Visibility="Collapsed"
-                Margin="4,4">
+                Margin="12,4">
 
             <StackPanel>
                 <!-- Place/Edit empty state -->
@@ -356,11 +359,16 @@
         <!-- Row 5: Results list -->
         <ListBox x:Name="ResultsList"
                  Grid.Row="5"
+                 Margin="8,0"
                  Style="{StaticResource ThemedListBox}"
                  ItemContainerStyle="{StaticResource ThemedListBoxItem}"
                  ItemsSource="{Binding Results}"
                  SelectedItem="{Binding HighlightedItem, Mode=OneWay}"
                  IsSynchronizedWithCurrentItem="False"
+                 VirtualizingStackPanel.IsVirtualizing="True"
+                 VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                 VirtualizingPanel.ScrollUnit="Pixel"
+                 ScrollViewer.CanContentScroll="True"
                  SelectionChanged="List_SelectionChanged"
                  MouseDoubleClick="ResultsList_MouseDoubleClick">
             <ListBox.GroupStyle>
@@ -408,7 +416,7 @@
                             </Style>
                         </DockPanel.Style>
 
-                        <!-- Star button (hidden for commands/shebangs/back rows/family summary rows) -->
+                        <!-- Star button (hidden for commands/shebangs/back rows/family summary rows/filter items) -->
                         <Button Content="{Binding FavoriteIcon}"
                                 DockPanel.Dock="Right"
                                 Click="ToggleFavorite_Click"
@@ -444,6 +452,9 @@
                                             <Setter Property="Visibility" Value="Collapsed"/>
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding TypeCount, Converter={StaticResource BoolToOpacity}}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding CheckGlyph, Converter={StaticResource NullToCollapsedConverter}}" Value="Visible">
                                             <Setter Property="Visibility" Value="Collapsed"/>
                                         </DataTrigger>
                                     </Style.Triggers>
@@ -520,6 +531,18 @@
                                        Opacity="0"/>
                         </StackPanel>
 
+                        <!-- Checkbox glyph (selection filter mode) -->
+                        <TextBlock Text="{Binding CheckGlyph}"
+                                   DockPanel.Dock="Left"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="14"
+                                   Width="16"
+                                   TextAlignment="Center"
+                                   Margin="0,0,6,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Visibility="{Binding CheckGlyph, Converter={StaticResource NullToCollapsedConverter}}"/>
+
                         <!-- Main content -->
                         <StackPanel VerticalAlignment="Center">
                             <!-- Back row: italic muted -->
@@ -561,22 +584,17 @@
             </ListBox.ItemTemplate>
         </ListBox>
 
-        <!-- Quick Action Pill Overlay -->
+        <!-- Quick Action Pill Overlay (unused canvas kept for overlay positioning) -->
         <Canvas x:Name="OverlayCanvas" Grid.Row="5" IsHitTestVisible="False"/>
+
+        <!-- Row 6: Bottom-pinned Action Bar -->
         <Border x:Name="ActionBarPopup"
-                Grid.Row="5"
-                VerticalAlignment="Top"
-                HorizontalAlignment="Left"
+                Grid.Row="6"
                 Visibility="Collapsed"
-                Background="{DynamicResource ListBackground}"
+                Background="{DynamicResource PaneBackground}"
                 BorderBrush="{DynamicResource SeparatorBrush}"
-                BorderThickness="1"
-                CornerRadius="2"
-                Padding="4,3"
-                Margin="8,0,8,0">
-            <Border.Effect>
-                <DropShadowEffect BlurRadius="8" Opacity="0.25" ShadowDepth="2"/>
-            </Border.Effect>
+                BorderThickness="0,1,0,0"
+                Padding="12,8">
             <ItemsControl ItemsSource="{Binding ActiveActions}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -587,7 +605,7 @@
                     <DataTemplate>
                         <Border CornerRadius="2"
                                 Padding="8,3"
-                                Margin="0,0,4,0"
+                                Margin="0,0,6,0"
                                 Cursor="Hand">
                             <Border.Style>
                                 <Style TargetType="Border">
@@ -637,6 +655,19 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+        </Border>
+
+        <!-- Row 6: Filter mode hint bar -->
+        <Border x:Name="FilterHintBar"
+                Grid.Row="6"
+                Visibility="Collapsed"
+                Background="{DynamicResource PaneBackground}"
+                BorderBrush="{DynamicResource SeparatorBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="12,6">
+            <TextBlock Text="{Binding FilterFooterHint}"
+                       FontSize="10"
+                       Foreground="{DynamicResource MutedText}"/>
         </Border>
 
         <!-- Inline Rename Overlay -->

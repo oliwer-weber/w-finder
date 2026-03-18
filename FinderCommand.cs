@@ -60,9 +60,9 @@ public class FinderCommand : IExternalCommand
             App.ViewModel.FilterPlacedTypes = settings.FilterPlacedTypesOnly;
 
             App.ViewModel.AreCategoryChipsExpanded = false;
-            pane.Show();
 
-            // Apply launch behavior
+            // Apply launch behavior BEFORE showing the pane so the UI renders
+            // in the correct mode immediately — eliminates white flash on CMD mode, etc.
             switch ((LaunchBehavior)settings.LaunchBehavior)
             {
                 case LaunchBehavior.RememberMode:
@@ -75,6 +75,8 @@ public class FinderCommand : IExternalCommand
                     App.ViewModel.ActivateDefaultMode((ActiveMode)settings.DefaultMode);
                     break;
             }
+
+            pane.Show();
         }
     }
 }

@@ -13,11 +13,11 @@
 
     <!-- Text colors -->
     <SolidColorBrush x:Key="PrimaryText"           Color="#c8d0db"/>
-    <SolidColorBrush x:Key="SecondaryText"         Color="#677890"/>
-    <SolidColorBrush x:Key="InactiveText"          Color="#526077"/>
+    <SolidColorBrush x:Key="SecondaryText"         Color="#8695aa"/>
+    <SolidColorBrush x:Key="InactiveText"          Color="#7a8a9e"/>
     <SolidColorBrush x:Key="SearchBoxPlaceholder"  Color="#526077"/>
-    <SolidColorBrush x:Key="MutedText"             Color="#677890"/>
-    <SolidColorBrush x:Key="SectionHeaderText"     Color="#5d7080"/>
+    <SolidColorBrush x:Key="MutedText"             Color="#8695aa"/>
+    <SolidColorBrush x:Key="SectionHeaderText"     Color="#7a8a9e"/>
 
     <!-- Interactive states (Revit-native blue selection) -->
     <SolidColorBrush x:Key="ItemHoverBackground"   Color="#3b4f5e"/>
@@ -45,10 +45,11 @@
     <Color x:Key="EditAccentColor">#6b5ea8</Color>
     <Color x:Key="CommandAccentColor">#8a6d3b</Color>
     <Color x:Key="ShebangAccentColor">#4a7c59</Color>
+    <Color x:Key="FilterAccentColor">#c9933a</Color>
 
     <!-- Hint text (empty states) -->
-    <SolidColorBrush x:Key="HintText"             Color="#526077"/>
-    <SolidColorBrush x:Key="HintKeyText"          Color="#677890"/>
+    <SolidColorBrush x:Key="HintText"             Color="#7a8a9e"/>
+    <SolidColorBrush x:Key="HintKeyText"          Color="#8a9bb0"/>
 
     <!-- Dot leader for section headers -->
     <SolidColorBrush x:Key="DotLeaderBrush"       Color="#3a4a5a"/>
