@@ -127,6 +127,24 @@ public partial class SettingsWindow : Window
         DialogResult = true;
     }
 
+    private void CategoryList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (GeneralPage == null) return; // Not yet initialized
+
+        GeneralPage.Visibility = Visibility.Collapsed;
+        ExportPage.Visibility = Visibility.Collapsed;
+        FamilyModePage.Visibility = Visibility.Collapsed;
+        HotkeyPage.Visibility = Visibility.Collapsed;
+
+        switch (CategoryList.SelectedIndex)
+        {
+            case 0: GeneralPage.Visibility = Visibility.Visible; break;
+            case 1: ExportPage.Visibility = Visibility.Visible; break;
+            case 2: FamilyModePage.Visibility = Visibility.Visible; break;
+            case 3: HotkeyPage.Visibility = Visibility.Visible; break;
+        }
+    }
+
     private void CancelBtn_Click(object sender, RoutedEventArgs e)
     {
         DialogResult = false;

@@ -2,171 +2,294 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Quip Settings"
-        SizeToContent="WidthAndHeight"
+        Width="520" Height="380"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
-        MinWidth="400"
         Background="{DynamicResource PaneBackground}">
 
-    <StackPanel Margin="20">
+    <Window.Resources>
+        <!-- Force readable text on ComboBox dropdown items.
+             Must be ItemContainerStyle (not implicit) because the popup visual tree
+             is disconnected from Window.Resources. -->
+        <Style x:Key="DropdownItemStyle" TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="#1a1a1a"/>
+            <Setter Property="Background" Value="#f6f7f9"/>
+        </Style>
 
-        <!-- ═══ Appearance ═══ -->
-        <TextBlock Text="APPEARANCE"
-                   FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"
-                   Foreground="{DynamicResource SecondaryText}"/>
+        <!-- Custom ComboBox toggle button (dropdown arrow) -->
+        <ControlTemplate x:Key="ComboBoxToggleButton" TargetType="ToggleButton">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition/>
+                    <ColumnDefinition Width="20"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="Border" Grid.ColumnSpan="2" CornerRadius="2"
+                        Background="{DynamicResource SearchBoxBackground}"
+                        BorderBrush="{DynamicResource SearchBoxBorder}"
+                        BorderThickness="1"/>
+                <!-- Arrow glyph -->
+                <Path x:Name="Arrow" Grid.Column="1"
+                      Fill="{DynamicResource PrimaryText}"
+                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Data="M 0 0 L 4 4 L 8 0 Z"/>
+            </Grid>
+        </ControlTemplate>
 
-        <CheckBox x:Name="DarkModeCheck"
-                  Content="Dark mode"
-                  FontSize="13"
-                  Foreground="{DynamicResource PrimaryText}"
-                  Margin="0,0,0,4"
-                  Checked="DarkModeCheck_Changed"
-                  Unchecked="DarkModeCheck_Changed"/>
+        <!-- Full ComboBox template so we control background + text color -->
+        <Style x:Key="SettingsComboBox" TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="ItemContainerStyle" Value="{StaticResource DropdownItemStyle}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Template="{StaticResource ComboBoxToggleButton}"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Focusable="False"
+                                          ClickMode="Press"/>
+                            <ContentPresenter x:Name="ContentSite"
+                                              IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                              Margin="8,4,24,4"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Left"
+                                              TextElement.Foreground="{DynamicResource PrimaryText}"/>
+                            <Popup x:Name="Popup" Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True" Focusable="False"
+                                   PopupAnimation="Slide">
+                                <Grid x:Name="DropDown"
+                                      SnapsToDevicePixels="True"
+                                      MinWidth="{TemplateBinding ActualWidth}"
+                                      MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border x:Name="DropDownBorder"
+                                            Background="#f6f7f9"
+                                            BorderBrush="{DynamicResource SearchBoxBorder}"
+                                            BorderThickness="1" CornerRadius="0,0,2,2"/>
+                                    <ScrollViewer Margin="2" SnapsToDevicePixels="True">
+                                        <StackPanel IsItemsHost="True"
+                                                    KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
-        <Separator Margin="0,12,0,12"
-                   Background="{DynamicResource SeparatorBrush}"/>
+        <!-- Sidebar item style -->
+        <Style x:Key="SidebarItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource ItemHoverBackground}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource ItemSelectedBackground}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
 
-        <!-- ═══ Export ═══ -->
-        <TextBlock Text="EXPORT"
-                   FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"
-                   Foreground="{DynamicResource SecondaryText}"/>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-        <TextBlock Text="Default export path for schedule Excel export:"
-                   FontSize="12" Margin="0,0,0,6"
-                   Foreground="{DynamicResource PrimaryText}"/>
+        <!-- Main two-column area -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-        <DockPanel Margin="0,0,0,4">
-            <Button x:Name="BrowseBtn"
-                    DockPanel.Dock="Right"
-                    Content="Browse..."
-                    Padding="12,4" Margin="8,0,0,0"
-                    FontSize="12"
-                    Click="BrowseBtn_Click"
+            <!-- Left sidebar -->
+            <Border Grid.Column="0"
                     Background="{DynamicResource ListBackground}"
-                    Foreground="{DynamicResource PrimaryText}"
-                    BorderBrush="{DynamicResource SearchBoxBorder}"/>
+                    BorderBrush="{DynamicResource SeparatorBrush}"
+                    BorderThickness="0,0,1,0">
+                <ListBox x:Name="CategoryList"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         ItemContainerStyle="{StaticResource SidebarItem}"
+                         SelectionChanged="CategoryList_SelectionChanged"
+                         SelectedIndex="0">
+                    <ListBoxItem Content="General"/>
+                    <ListBoxItem Content="Export"/>
+                    <ListBoxItem Content="Family mode"/>
+                    <ListBoxItem Content="Hotkey"/>
+                </ListBox>
+            </Border>
 
-            <TextBox x:Name="ExportPathBox"
-                     FontSize="12" Padding="6,4"
-                     VerticalContentAlignment="Center"
-                     Background="{DynamicResource SearchBoxBackground}"
-                     Foreground="{DynamicResource PrimaryText}"
-                     BorderBrush="{DynamicResource SearchBoxBorder}"/>
-        </DockPanel>
+            <!-- Right content area -->
+            <Border Grid.Column="1" Padding="20,16">
+                <Grid>
+                    <!-- General page -->
+                    <StackPanel x:Name="GeneralPage">
+                        <CheckBox x:Name="DarkModeCheck"
+                                  Content="Dark mode"
+                                  FontSize="13"
+                                  Foreground="{DynamicResource PrimaryText}"
+                                  Margin="0,0,0,12"
+                                  Checked="DarkModeCheck_Changed"
+                                  Unchecked="DarkModeCheck_Changed"/>
 
-        <Separator Margin="0,12,0,12"
-                   Background="{DynamicResource SeparatorBrush}"/>
+                        <TextBlock Text="When Quip opens:"
+                                   FontSize="12" Margin="0,0,0,6"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Opacity="0.7"/>
 
-        <!-- ═══ Family Mode ═══ -->
-        <TextBlock Text="FAMILY / PLACE MODE"
-                   FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"
-                   Foreground="{DynamicResource SecondaryText}"/>
+                        <ComboBox x:Name="LaunchBehaviorCombo"
+                                  Style="{StaticResource SettingsComboBox}"
+                                  Margin="0,0,0,4"
+                                  SelectionChanged="LaunchBehaviorCombo_SelectionChanged">
+                            <ComboBoxItem Content="Clean slate"/>
+                            <ComboBoxItem Content="Remember last mode"/>
+                            <ComboBoxItem Content="Remember mode + search text"/>
+                        </ComboBox>
 
-        <CheckBox x:Name="FilterPlacedCheck"
-                  Content="Only show types already placed in the project"
-                  FontSize="13"
-                  Foreground="{DynamicResource PrimaryText}"
-                  Margin="0,0,0,4"/>
+                        <StackPanel x:Name="DefaultModePanel" Margin="0,8,0,0">
+                            <TextBlock Text="Default mode:"
+                                       FontSize="12" Margin="0,0,0,6"
+                                       Foreground="{DynamicResource PrimaryText}"
+                                       Opacity="0.7"/>
 
-        <TextBlock Text="When enabled, Place mode (> prefix) only shows family types that have at least one instance in the current project."
-                   FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"
-                   Foreground="{DynamicResource InactiveText}"/>
+                            <ComboBox x:Name="DefaultModeCombo"
+                                      Style="{StaticResource SettingsComboBox}">
+                                <ComboBoxItem Content="Browser"/>
+                                <ComboBoxItem Content="Family  (>)"/>
+                                <ComboBoxItem Content="Palette  (:)"/>
+                                <ComboBoxItem Content="Quips  (!)"/>
+                            </ComboBox>
+                        </StackPanel>
 
-        <Separator Margin="0,12,0,12"
-                   Background="{DynamicResource SeparatorBrush}"/>
+                        <TextBlock Text="Clean slate resets each time. Use 'default mode' to always start in a specific mode — you can backspace to get back to Browser."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Foreground="{DynamicResource InactiveText}"
+                                   Opacity="0.7"/>
+                    </StackPanel>
 
-        <!-- ═══ Launch Behavior ═══ -->
-        <TextBlock Text="LAUNCH BEHAVIOR"
-                   FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"
-                   Foreground="{DynamicResource SecondaryText}"/>
+                    <!-- Export page -->
+                    <StackPanel x:Name="ExportPage" Visibility="Collapsed">
+                        <TextBlock Text="Default export path"
+                                   FontSize="12" Margin="0,0,0,6"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Opacity="0.7"/>
 
-        <TextBlock Text="When Quip opens:"
-                   FontSize="12" Margin="0,0,0,6"
-                   Foreground="{DynamicResource PrimaryText}"/>
+                        <DockPanel Margin="0,0,0,4">
+                            <Button x:Name="BrowseBtn"
+                                    DockPanel.Dock="Right"
+                                    Content="Browse..."
+                                    Padding="12,4" Margin="8,0,0,0"
+                                    FontSize="12"
+                                    Click="BrowseBtn_Click"
+                                    Background="{DynamicResource ListBackground}"
+                                    Foreground="{DynamicResource PrimaryText}"
+                                    BorderBrush="{DynamicResource SearchBoxBorder}"/>
 
-        <ComboBox x:Name="LaunchBehaviorCombo"
-                  FontSize="13" Padding="6,4" Margin="0,0,0,4"
-                  Background="{DynamicResource SearchBoxBackground}"
-                  Foreground="{DynamicResource PrimaryText}"
-                  BorderBrush="{DynamicResource SearchBoxBorder}"
-                  SelectionChanged="LaunchBehaviorCombo_SelectionChanged">
-            <ComboBoxItem Content="Clean slate"/>
-            <ComboBoxItem Content="Remember last mode"/>
-            <ComboBoxItem Content="Remember mode + search text"/>
-        </ComboBox>
+                            <TextBox x:Name="ExportPathBox"
+                                     FontSize="12" Padding="6,4"
+                                     VerticalContentAlignment="Center"
+                                     Background="{DynamicResource SearchBoxBackground}"
+                                     Foreground="{DynamicResource PrimaryText}"
+                                     BorderBrush="{DynamicResource SearchBoxBorder}"/>
+                        </DockPanel>
 
-        <StackPanel x:Name="DefaultModePanel" Margin="0,8,0,0">
-            <TextBlock Text="Default mode:"
-                       FontSize="12" Margin="0,0,0,6"
-                       Foreground="{DynamicResource PrimaryText}"/>
+                        <TextBlock Text="Used as the default folder when exporting schedules to Excel."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                                   Foreground="{DynamicResource InactiveText}"
+                                   Opacity="0.7"/>
+                    </StackPanel>
 
-            <ComboBox x:Name="DefaultModeCombo"
-                      FontSize="13" Padding="6,4"
-                      Background="{DynamicResource SearchBoxBackground}"
-                      Foreground="{DynamicResource PrimaryText}"
-                      BorderBrush="{DynamicResource SearchBoxBorder}">
-                <ComboBoxItem Content="Browser"/>
-                <ComboBoxItem Content="Place  (>)"/>
-                <ComboBoxItem Content="Command  (:)"/>
-                <ComboBoxItem Content="Shebang  (!)"/>
-            </ComboBox>
-        </StackPanel>
+                    <!-- Family mode page -->
+                    <StackPanel x:Name="FamilyModePage" Visibility="Collapsed">
+                        <CheckBox x:Name="FilterPlacedCheck"
+                                  Content="Only show types already placed in the project"
+                                  FontSize="13"
+                                  Foreground="{DynamicResource PrimaryText}"
+                                  Margin="0,0,0,4"/>
 
-        <TextBlock Text="Clean slate resets each time. Use 'default mode' to always start in a specific mode — you can backspace to get back to Browser."
-                   FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
-                   Foreground="{DynamicResource InactiveText}"/>
+                        <TextBlock Text="When enabled, Place mode (> prefix) only shows family types that have at least one instance in the current project."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"
+                                   Foreground="{DynamicResource InactiveText}"
+                                   Opacity="0.7"/>
+                    </StackPanel>
 
-        <Separator Margin="0,12,0,12"
-                   Background="{DynamicResource SeparatorBrush}"/>
+                    <!-- Hotkey page -->
+                    <StackPanel x:Name="HotkeyPage" Visibility="Collapsed">
+                        <TextBlock Text="Global keyboard shortcut"
+                                   FontSize="12" Margin="0,0,0,6"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   Opacity="0.7"/>
 
-        <!-- ═══ Global Hotkey ═══ -->
-        <TextBlock Text="GLOBAL HOTKEY"
-                   FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"
-                   Foreground="{DynamicResource SecondaryText}"/>
+                        <TextBox x:Name="HotkeyBox"
+                                 IsReadOnly="True"
+                                 FontSize="13" Padding="6,4"
+                                 TextAlignment="Center"
+                                 VerticalContentAlignment="Center"
+                                 Background="{DynamicResource SearchBoxBackground}"
+                                 Foreground="{DynamicResource PrimaryText}"
+                                 BorderBrush="{DynamicResource SearchBoxBorder}"
+                                 PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                 GotFocus="HotkeyBox_GotFocus"
+                                 LostFocus="HotkeyBox_LostFocus"/>
 
-        <TextBlock Text="Works even when a schedule view has keyboard focus:"
-                   FontSize="12" Margin="0,0,0,6"
-                   Foreground="{DynamicResource PrimaryText}"/>
+                        <TextBlock Text="Click the box and press your desired key combination (must include Ctrl, Alt, or Shift). Works even when a schedule view has keyboard focus."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                                   Foreground="{DynamicResource InactiveText}"
+                                   Opacity="0.7"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
 
-        <TextBox x:Name="HotkeyBox"
-                 IsReadOnly="True"
-                 FontSize="13" Padding="6,4"
-                 TextAlignment="Center"
-                 VerticalContentAlignment="Center"
-                 Background="{DynamicResource SearchBoxBackground}"
-                 Foreground="{DynamicResource PrimaryText}"
-                 BorderBrush="{DynamicResource SearchBoxBorder}"
-                 PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                 GotFocus="HotkeyBox_GotFocus"
-                 LostFocus="HotkeyBox_LostFocus"/>
+        <!-- Bottom button bar -->
+        <Border Grid.Row="1"
+                BorderBrush="{DynamicResource SeparatorBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="16,12">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="CancelBtn"
+                        Content="Cancel"
+                        Padding="16,6" Margin="0,0,8,0"
+                        FontSize="12"
+                        Click="CancelBtn_Click"
+                        Background="{DynamicResource ListBackground}"
+                        Foreground="{DynamicResource PrimaryText}"
+                        BorderBrush="{DynamicResource SearchBoxBorder}"/>
 
-        <TextBlock Text="Click the box and press your desired key combination (must include Ctrl, Alt, or Shift)."
-                   FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
-                   Foreground="{DynamicResource InactiveText}"/>
-
-        <Separator Margin="0,16,0,12"
-                   Background="{DynamicResource SeparatorBrush}"/>
-
-        <!-- ═══ Buttons ═══ -->
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="CancelBtn"
-                    Content="Cancel"
-                    Padding="16,6" Margin="0,0,8,0"
-                    FontSize="12"
-                    Click="CancelBtn_Click"
-                    Background="{DynamicResource ListBackground}"
-                    Foreground="{DynamicResource PrimaryText}"
-                    BorderBrush="{DynamicResource SearchBoxBorder}"/>
-
-            <Button x:Name="SaveBtn"
-                    Content="Save"
-                    Padding="16,6"
-                    FontSize="12" FontWeight="SemiBold"
-                    Click="SaveBtn_Click"
-                    Background="{DynamicResource SearchBoxBorderFocus}"
-                    Foreground="White"
-                    BorderBrush="{DynamicResource SearchBoxBorderFocus}"/>
-        </StackPanel>
-
-    </StackPanel>
+                <Button x:Name="SaveBtn"
+                        Content="Save"
+                        Padding="16,6"
+                        FontSize="12" FontWeight="SemiBold"
+                        Click="SaveBtn_Click"
+                        Background="{DynamicResource SearchBoxBorderFocus}"
+                        Foreground="White"
+                        BorderBrush="{DynamicResource SearchBoxBorderFocus}"/>
+            </StackPanel>
+        </Border>
+    </Grid>
 </Window>

@@ -48,6 +48,29 @@ public partial class FinderPaneView : UserControl
 
         // Set up TextInput handler for consumed prefix detection
         SearchBox.PreviewTextInput += SearchBox_PreviewTextInput;
+
+        // Compute uniform pill width once from all possible pill texts
+        ComputeUniformPillWidth();
+    }
+
+    private void ComputeUniformPillWidth()
+    {
+        var typeface = new Typeface(ModePillTextBlock.FontFamily, ModePillTextBlock.FontStyle,
+            ModePillTextBlock.FontWeight, ModePillTextBlock.FontStretch);
+        var dpi = VisualTreeHelper.GetDpi(this);
+        double pixelsPerDip = dpi.PixelsPerDip > 0 ? dpi.PixelsPerDip : 1.0;
+
+        double maxWidth = 0;
+        foreach (var text in FinderPaneViewModel.AllPillTexts)
+        {
+            var ft = new System.Windows.Media.FormattedText(text, System.Globalization.CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight, typeface, ModePillTextBlock.FontSize, Brushes.Black,
+                pixelsPerDip);
+            if (ft.Width > maxWidth) maxWidth = ft.Width;
+        }
+
+        // Add horizontal padding (5 left + 5 right) + border (1+1)
+        ModePillBorder.MinWidth = Math.Ceiling(maxWidth) + 12;
     }
 
     // ── Consumed Prefix (Mode Pill) ────────────────────────────────
@@ -91,26 +114,40 @@ public partial class FinderPaneView : UserControl
 
     /// <summary>
     /// Updates the mode pill border accent color based on the active mode.
+    /// All modes (including Browser) use the same formula:
+    /// border at 100% accent, background at ~22% accent, tinted text.
     /// </summary>
     private void UpdateModePillAccent()
     {
-        if (App.ViewModel.ActiveMode == ActiveMode.Browser)
+        // Selection filter mode uses its own amber/gold accent
+        if (App.ViewModel.IsInSelectionFilterMode)
         {
-            // Neutral pill: oxford-blue border all around, no accent tint
-            var pillBorder = (SolidColorBrush)FindResource("PillBorder");
-            ModePillBorder.BorderBrush = pillBorder;
-            ModePillBorder.BorderThickness = new Thickness(1);
-            ModePillBorder.Background = Brushes.Transparent;
-            ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("BrowserPillText");
+            var filterColor = (WpfColor)FindResource("FilterAccentColor");
+            var filterBrush = new SolidColorBrush(filterColor);
+            filterBrush.Freeze();
+            ModePillBorder.BorderBrush = filterBrush;
+            ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
+            var filterBg = WpfColor.FromArgb((byte)(255 * 0.22), filterColor.R, filterColor.G, filterColor.B);
+            ModePillBorder.Background = new SolidColorBrush(filterBg);
+            ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("FilterPillText");
             return;
         }
 
+        // Resolve accent color and text brush for current mode
         WpfColor accentColor = App.ViewModel.ActiveMode switch
         {
             ActiveMode.Place => (WpfColor)FindResource("PlaceAccentColor"),
             ActiveMode.Command => (WpfColor)FindResource("CommandAccentColor"),
             ActiveMode.Shebang => (WpfColor)FindResource("ShebangAccentColor"),
-            _ => WpfColor.FromArgb(0, 0, 0, 0)
+            _ => (WpfColor)FindResource("BrowserAccentColor")
+        };
+
+        string textBrushKey = App.ViewModel.ActiveMode switch
+        {
+            ActiveMode.Place => "PlacePillText",
+            ActiveMode.Command => "CommandPillText",
+            ActiveMode.Shebang => "ShebangPillText",
+            _ => "BrowserPillText"
         };
 
         // All borders use accent color — thicker left for identity signal
@@ -119,12 +156,12 @@ public partial class FinderPaneView : UserControl
         ModePillBorder.BorderBrush = accentBrush;
         ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
 
-        // Accent background tint at 14% — enough to feel intentional
-        var bgColor = WpfColor.FromArgb((byte)(255 * 0.14), accentColor.R, accentColor.G, accentColor.B);
+        // Accent background tint at ~22% opacity
+        var bgColor = WpfColor.FromArgb((byte)(255 * 0.22), accentColor.R, accentColor.G, accentColor.B);
         ModePillBorder.Background = new SolidColorBrush(bgColor);
 
-        // Bright pill text for colored modes
-        ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("PillText");
+        // Mode-tinted text
+        ModePillTextBlock.Foreground = (SolidColorBrush)FindResource(textBrushKey);
     }
 
     // ── Empty State Management ─────────────────────────────────────
@@ -283,8 +320,8 @@ public partial class FinderPaneView : UserControl
 
         view.GroupDescriptions.Clear();
 
-        // Group by GroupKey for all modes except Shebang
-        if (!App.ViewModel.IsShebangMode)
+        // Group by GroupKey for all modes except Shebang and Selection Filter
+        if (!App.ViewModel.IsShebangMode && !App.ViewModel.IsInSelectionFilterMode)
         {
             view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BrowserItem.GroupKey)));
         }
@@ -296,7 +333,8 @@ public partial class FinderPaneView : UserControl
     {
         if (e.PropertyName == nameof(FinderPaneViewModel.IsActionBarVisible))
         {
-            PositionOverlay(ActionBarPopup);
+            ActionBarPopup.Visibility = App.ViewModel.IsActionBarVisible
+                ? WpfVisibility.Visible : WpfVisibility.Collapsed;
             return;
         }
 
@@ -319,6 +357,15 @@ public partial class FinderPaneView : UserControl
             || e.PropertyName == nameof(FinderPaneViewModel.IsChipNavigationActive))
         {
             UpdateChipHighlight();
+            return;
+        }
+
+        if (e.PropertyName == nameof(FinderPaneViewModel.IsInSelectionFilterMode))
+        {
+            FilterHintBar.Visibility = App.ViewModel.IsInSelectionFilterMode
+                ? WpfVisibility.Visible : WpfVisibility.Collapsed;
+            UpdateModePillAccent();
+            UpdateResultGrouping();
             return;
         }
 
@@ -403,8 +450,7 @@ public partial class FinderPaneView : UserControl
 
     private void PositionOverlay(Border overlay)
     {
-        bool shouldShow = overlay == ActionBarPopup ? App.ViewModel.IsActionBarVisible
-            : overlay == InlineRenamePopup ? App.ViewModel.IsInlineRenameVisible
+        bool shouldShow = overlay == InlineRenamePopup ? App.ViewModel.IsInlineRenameVisible
             : App.ViewModel.HasInlineError;
 
         if (!shouldShow)
@@ -508,6 +554,57 @@ public partial class FinderPaneView : UserControl
 
     private void SearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // Selection filter mode intercepts all keys first
+        var vm = App.ViewModel;
+        if (vm.IsInSelectionFilterMode)
+        {
+            switch (e.Key)
+            {
+                case Key.Space:
+                    vm.FilterToggleChecked();
+                    e.Handled = true;
+                    return;
+                case Key.Right:
+                    vm.FilterDrillIn();
+                    e.Handled = true;
+                    return;
+                case Key.Left:
+                    vm.FilterGoBack();
+                    e.Handled = true;
+                    return;
+                case Key.Enter:
+                    ApplySelectionFilter();
+                    e.Handled = true;
+                    return;
+                case Key.Escape:
+                    vm.ExitSelectionFilterMode();
+                    UpdateModePillAccent();
+                    UpdateResultGrouping();
+                    e.Handled = true;
+                    return;
+                case Key.Up:
+                    vm.MoveHighlight(-1);
+                    ScrollHighlightedIntoView();
+                    e.Handled = true;
+                    return;
+                case Key.Down:
+                    vm.MoveHighlight(1);
+                    ScrollHighlightedIntoView();
+                    e.Handled = true;
+                    return;
+                case Key.Back:
+                    if (string.IsNullOrEmpty(vm.SearchText))
+                    {
+                        vm.FilterGoBack();
+                        e.Handled = true;
+                    }
+                    // else: let Backspace delete search text normally
+                    return;
+            }
+            // All other keys: let typing through for fuzzy search within current level
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.Back:
@@ -621,6 +718,11 @@ public partial class FinderPaneView : UserControl
                     if (App.ViewModel.IsShebangMode && highlighted.Kind == BrowserItemKind.Shebang)
                     {
                         var shebangId = highlighted.CommandName;
+                        if (shebangId == "sf")
+                        {
+                            LaunchSelectionFilter();
+                            break;
+                        }
                         if (shebangId != null)
                         {
                             RevitBackgroundTask.Raise(uiApp =>
@@ -940,6 +1042,11 @@ public partial class FinderPaneView : UserControl
         if (App.ViewModel.IsShebangMode && item.Kind == BrowserItemKind.Shebang)
         {
             var shebangId = item.CommandName;
+            if (shebangId == "sf")
+            {
+                LaunchSelectionFilter();
+                return;
+            }
             if (shebangId != null)
             {
                 RevitBackgroundTask.Raise(uiApp =>
@@ -990,6 +1097,109 @@ public partial class FinderPaneView : UserControl
                     uidoc.RequestViewChange(view);
             });
         }
+    }
+
+    // ── Selection Filter ───────────────────────────────────────────
+
+    /// <summary>
+    /// Reads the current Revit selection on the API thread, builds the filter tree,
+    /// and enters selection filter mode on the UI thread.
+    /// </summary>
+    private void LaunchSelectionFilter()
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var uidoc = uiApp.ActiveUIDocument;
+            if (uidoc == null) return;
+
+            var selIds = uidoc.Selection.GetElementIds();
+            if (selIds.Count == 0)
+            {
+                Dispatcher.Invoke(() =>
+                    App.ViewModel.ShowInlineError("Select elements in the model first"));
+                return;
+            }
+
+            var doc = uidoc.Document;
+            var elements = new List<ElementData>();
+
+            foreach (var id in selIds)
+            {
+                var elem = doc.GetElement(id);
+                if (elem == null) continue;
+
+                string catName = elem.Category?.Name ?? "Uncategorized";
+                string famName;
+                string typeName;
+
+                if (elem is FamilyInstance fi)
+                {
+                    famName = fi.Symbol?.Family?.Name ?? "Unknown";
+                    typeName = fi.Symbol?.Name ?? "";
+                }
+                else
+                {
+                    // System families: try ALL_MODEL_FAMILY_NAME on the type element
+                    var typeId = elem.GetTypeId();
+                    var typeElem = typeId != ElementId.InvalidElementId ? doc.GetElement(typeId) : null;
+                    var famParam = typeElem?.get_Parameter(BuiltInParameter.ALL_MODEL_FAMILY_NAME);
+                    famName = famParam?.AsString() ?? elem.Category?.Name ?? "Other";
+                    typeName = typeElem?.Name ?? "";
+                }
+
+                // Instance label: Mark parameter if available, else element ID
+                var mark = elem.get_Parameter(BuiltInParameter.ALL_MODEL_MARK)?.AsString();
+                string instanceLabel = !string.IsNullOrEmpty(mark) ? mark : $"#{id.Value}";
+
+                elements.Add(new ElementData
+                {
+                    ElementId = id.Value,
+                    CategoryName = catName,
+                    FamilyName = famName,
+                    TypeName = typeName,
+                    InstanceLabel = instanceLabel
+                });
+            }
+
+            var roots = SelectionFilterNode.Build(elements);
+
+            Dispatcher.Invoke(() =>
+            {
+                App.ViewModel.EnterSelectionFilterMode(roots);
+                UpdateModePillAccent();
+                UpdateResultGrouping();
+            });
+        });
+    }
+
+    /// <summary>
+    /// Applies the current filter selection to Revit and exits filter mode.
+    /// </summary>
+    private void ApplySelectionFilter()
+    {
+        var checkedIds = App.ViewModel.GetFilterCheckedElementIds();
+
+        if (checkedIds.Count == 0)
+        {
+            App.ViewModel.ShowInlineError("No elements selected");
+            return;
+        }
+
+        int count = checkedIds.Count;
+        App.ViewModel.ExitSelectionFilterMode();
+        UpdateModePillAccent();
+        UpdateResultGrouping();
+
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var uidoc = uiApp.ActiveUIDocument;
+            if (uidoc == null) return;
+            var elementIds = checkedIds.Select(id => new ElementId(id)).ToList();
+            uidoc.Selection.SetElementIds(elementIds);
+
+            Dispatcher.Invoke(() =>
+                App.ViewModel.ShowInlineSuccess($"Selection refined to {count} elements"));
+        });
     }
 
     private void OnFavoritesChanged()

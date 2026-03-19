@@ -93,6 +93,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(ShowFavorites));
             OnPropertyChanged(nameof(IsEmptyState));
             OnPropertyChanged(nameof(ModePillText));
+            OnPropertyChanged(nameof(PlaceholderText));
             OnPropertyChanged(nameof(HasModePill));
         }
     }
@@ -100,15 +101,33 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>
     /// The display text for the mode pill chip inside the search box.
     /// </summary>
-    public string ModePillText => ActiveMode switch
-    {
-        ActiveMode.Place => "PLACE",
-        ActiveMode.Command => "CMD",
-        ActiveMode.Shebang => "SHEBANG",
-        _ => "BROWSER"
-    };
+    public string ModePillText => IsInSelectionFilterMode
+        ? "FILTER"
+        : ActiveMode switch
+        {
+            ActiveMode.Place => "FAMILY",
+            ActiveMode.Command => "PALETTE",
+            ActiveMode.Shebang => "QUIPS",
+            _ => "BROWSER"
+        };
 
     public bool HasModePill => true;
+
+    /// <summary>
+    /// Dynamic placeholder text for the search box, based on the active mode.
+    /// </summary>
+    public string PlaceholderText => ActiveMode switch
+    {
+        ActiveMode.Place => "Search families to place or edit\u2026",
+        ActiveMode.Command => "Search Revit commands\u2026",
+        ActiveMode.Shebang => "Search quips to run\u2026",
+        _ => "Search views, sheets, and more\u2026"
+    };
+
+    /// <summary>
+    /// Returns all possible pill text strings (for measuring uniform pill width at startup).
+    /// </summary>
+    public static string[] AllPillTexts => new[] { "BROWSER", "FAMILY", "PALETTE", "QUIPS", "FILTER" };
 
     /// <summary>
     /// Called by the view when the user types a prefix character.
@@ -320,6 +339,226 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         RefreshResults();
     }
 
+    // ── Selection Filter Mode ──────────────────────────────────────
+
+    private bool _isInSelectionFilterMode;
+    public bool IsInSelectionFilterMode
+    {
+        get => _isInSelectionFilterMode;
+        set
+        {
+            _isInSelectionFilterMode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ModePillText));
+            OnPropertyChanged(nameof(FilterFooterHint));
+        }
+    }
+
+    private List<SelectionFilterNode> _filterRootNodes = new();
+    private Stack<SelectionFilterNode?> _filterNavStack = new();
+    private List<SelectionFilterNode> _filterCurrentNodes = new();
+    private Dictionary<long, SelectionFilterNode> _filterNodeMap = new();
+    private int _filterTotalCount;
+
+    private string _filterBreadcrumb = "Selection";
+    public string FilterBreadcrumb
+    {
+        get => _filterBreadcrumb;
+        set { _filterBreadcrumb = value; OnPropertyChanged(); }
+    }
+
+    public string FilterFooterHint => IsInSelectionFilterMode
+        ? "Space: toggle \u00b7 \u2192: drill in \u00b7 \u2190: back \u00b7 Enter: apply \u00b7 Esc: cancel"
+        : string.Empty;
+
+    /// <summary>
+    /// Enters selection filter mode with the given tree of category nodes.
+    /// </summary>
+    public void EnterSelectionFilterMode(List<SelectionFilterNode> rootNodes)
+    {
+        _filterRootNodes = rootNodes;
+        _filterNavStack.Clear();
+        _filterCurrentNodes = rootNodes;
+        _filterTotalCount = rootNodes.Sum(n => n.TotalCount);
+        FilterBreadcrumb = "Selection";
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+
+        IsInSelectionFilterMode = true;
+        RefreshFilterDisplay();
+    }
+
+    /// <summary>
+    /// Exits selection filter mode and restores the normal view.
+    /// </summary>
+    public void ExitSelectionFilterMode()
+    {
+        IsInSelectionFilterMode = false;
+        _filterRootNodes.Clear();
+        _filterNavStack.Clear();
+        _filterCurrentNodes.Clear();
+        _filterNodeMap.Clear();
+        _filterTotalCount = 0;
+        FilterBreadcrumb = "Selection";
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        _debounceTimer.Stop();
+        RefreshResults();
+    }
+
+    /// <summary>
+    /// Drills into the highlighted node's children (e.g. Category → Families).
+    /// </summary>
+    public void FilterDrillIn()
+    {
+        if (HighlightedItem == null) return;
+        if (!_filterNodeMap.TryGetValue(HighlightedItem.ElementId, out var node)) return;
+        if (node.Children.Count == 0) return; // at instance level
+
+        // Push current parent onto nav stack (null means we were at root)
+        _filterNavStack.Push(node.Parent);
+        _filterCurrentNodes = node.Children;
+        FilterBreadcrumb += $" > {node.Name}";
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        RefreshFilterDisplay();
+    }
+
+    /// <summary>
+    /// Goes back one level in the filter hierarchy. No-op at root.
+    /// </summary>
+    public void FilterGoBack()
+    {
+        if (_filterNavStack.Count == 0) return; // at root — only Escape exits
+
+        var parent = _filterNavStack.Pop();
+        if (parent == null)
+        {
+            // Back to root
+            _filterCurrentNodes = _filterRootNodes;
+            FilterBreadcrumb = "Selection";
+        }
+        else
+        {
+            _filterCurrentNodes = parent.Children;
+            // Trim breadcrumb: remove last " > segment"
+            int lastArrow = FilterBreadcrumb.LastIndexOf(" > ");
+            FilterBreadcrumb = lastArrow >= 0 ? FilterBreadcrumb.Substring(0, lastArrow) : "Selection";
+        }
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        RefreshFilterDisplay();
+    }
+
+    /// <summary>
+    /// Toggles the checked state of the highlighted filter node.
+    /// </summary>
+    public void FilterToggleChecked()
+    {
+        if (HighlightedItem == null) return;
+        if (!_filterNodeMap.TryGetValue(HighlightedItem.ElementId, out var node)) return;
+
+        node.Toggle();
+        RefreshFilterDisplay();
+    }
+
+    /// <summary>
+    /// Returns all checked leaf ElementIds from the filter tree.
+    /// </summary>
+    public HashSet<long> GetFilterCheckedElementIds()
+    {
+        var result = new HashSet<long>();
+        foreach (var root in _filterRootNodes)
+        {
+            foreach (var id in root.GetCheckedLeafIds())
+                result.Add(id);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Builds BrowserItem wrappers for the current filter level and populates Results.
+    /// </summary>
+    private void RefreshFilterDisplay()
+    {
+        // Remember the current highlight position before rebuilding
+        int prevHighlightIndex = HighlightedItem != null ? Results.IndexOf(HighlightedItem) : -1;
+
+        _cachedUnifiedList = null;
+        _filterNodeMap.Clear();
+
+        var nodes = _filterCurrentNodes;
+
+        // Apply fuzzy filter if search text is non-empty
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var query = _searchText.ToLowerInvariant();
+            nodes = nodes.Where(n => n.Name.ToLowerInvariant().Contains(query)).ToList();
+        }
+
+        var items = new List<BrowserItem>();
+        long nextId = -2000;
+
+        foreach (var node in nodes)
+        {
+            // Segoe MDL2 Assets glyphs — consistent sizing across all states
+            string checkGlyph = node.IsChecked switch
+            {
+                true => "\uE73A",   // CheckboxComposite (filled check)
+                false => "\uE739",  // Checkbox (empty square)
+                null => "\uE73C"    // CheckboxCompositeReversed (partial/indeterminate)
+            };
+
+            string name = node.Level == SelectionFilterLevel.Instance
+                ? (node.InstanceLabel ?? $"#{node.LeafElementIds.FirstOrDefault()}")
+                : $"{node.Name} ({node.TotalCount})";
+
+            string category = node.Level switch
+            {
+                SelectionFilterLevel.Category => $"{node.TotalCount} elements",
+                SelectionFilterLevel.Family => $"{node.Children.Count} types",
+                SelectionFilterLevel.Type => $"{node.TotalCount} instances",
+                SelectionFilterLevel.Instance => $"#{node.LeafElementIds.FirstOrDefault()}",
+                _ => ""
+            };
+
+            var itemId = nextId--;
+            var item = new BrowserItem
+            {
+                Name = name,
+                Category = category,
+                ElementId = itemId,
+                Kind = BrowserItemKind.Shebang, // hides star button
+                CheckGlyph = checkGlyph,
+                GroupKey = node.Level.ToString().ToUpperInvariant()
+            };
+
+            items.Add(item);
+            _filterNodeMap[itemId] = node;
+        }
+
+        Results.ReplaceAll(items);
+
+        // Count checked items
+        int checkedCount = 0;
+        foreach (var root in _filterRootNodes)
+            checkedCount += root.GetCheckedLeafIds().Count;
+
+        StatusText = $"{FilterBreadcrumb} \u2014 {checkedCount} of {_filterTotalCount} selected";
+
+        // Preserve highlight position (e.g. after Space toggle) instead of jumping to top
+        if (prevHighlightIndex >= 0 && prevHighlightIndex < Results.Count)
+            HighlightedItem = Results[prevHighlightIndex];
+        else if (Results.Count > 0)
+            HighlightedItem = Results[0];
+        else
+            HighlightedItem = null;
+    }
+
     // ── Family input parsing ────────────────────────────────────────
 
     /// <summary>
@@ -399,11 +638,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// </summary>
     public void ActivateDefaultMode(ActiveMode mode)
     {
-        if (mode == ActiveMode.Browser)
-        {
-            RequestFocusSearch();
-            return;
-        }
+        // Always reset to the requested mode (fixes clean-slate not resetting)
         ActivateMode(mode);
         FocusSearchRequested?.Invoke();
     }
@@ -566,6 +801,13 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public void RefreshResults()
     {
         _cachedUnifiedList = null;
+
+        // In selection filter mode, route to filter display instead
+        if (IsInSelectionFilterMode)
+        {
+            RefreshFilterDisplay();
+            return;
+        }
 
         if (IsShebangMode)
         {

@@ -16,6 +16,7 @@ public static class ShebangService
     {
         ("pu", "Toggle Project Units (Imperial \u2194 SI)", "Units"),
         ("pin", "Pin All Levels, Grids & Links", "Model"),
+        ("sf", "Selection Filter", "Selection"),
     };
 
     /// <summary>
@@ -57,6 +58,9 @@ public static class ShebangService
                 break;
             case "pin":
                 PinAllLevelsGridsLinks(uiApp);
+                break;
+            case "sf":
+                // Interactive filter — handled by code-behind, not here.
                 break;
         }
     }
