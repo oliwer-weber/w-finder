@@ -40,12 +40,18 @@
     <!-- Mode pill colors -->
     <SolidColorBrush x:Key="PillText"              Color="#d5d9e2"/>
     <SolidColorBrush x:Key="PillBorder"            Color="#434e61"/>
-    <SolidColorBrush x:Key="BrowserPillText"       Color="#5d7080"/>
+    <Color x:Key="BrowserAccentColor">#4a6a8c</Color>
     <Color x:Key="PlaceAccentColor">#4a7c59</Color>
     <Color x:Key="EditAccentColor">#6b5ea8</Color>
-    <Color x:Key="CommandAccentColor">#8a6d3b</Color>
-    <Color x:Key="ShebangAccentColor">#4a7c59</Color>
+    <Color x:Key="CommandAccentColor">#7c8c4a</Color>
+    <Color x:Key="ShebangAccentColor">#744a8c</Color>
     <Color x:Key="FilterAccentColor">#c9933a</Color>
+    <!-- Per-mode pill text (lightened ~40% for dark mode) -->
+    <SolidColorBrush x:Key="BrowserPillText"       Color="#7a9ab8"/>
+    <SolidColorBrush x:Key="PlacePillText"         Color="#7aac89"/>
+    <SolidColorBrush x:Key="CommandPillText"       Color="#a6b87a"/>
+    <SolidColorBrush x:Key="ShebangPillText"       Color="#a47ab8"/>
+    <SolidColorBrush x:Key="FilterPillText"        Color="#d4a85a"/>
 
     <!-- Hint text (empty states) -->
     <SolidColorBrush x:Key="HintText"             Color="#7a8a9e"/>

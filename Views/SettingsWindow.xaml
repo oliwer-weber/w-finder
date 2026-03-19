@@ -180,9 +180,9 @@
                             <ComboBox x:Name="DefaultModeCombo"
                                       Style="{StaticResource SettingsComboBox}">
                                 <ComboBoxItem Content="Browser"/>
-                                <ComboBoxItem Content="Place  (>)"/>
-                                <ComboBoxItem Content="Command  (:)"/>
-                                <ComboBoxItem Content="Shebang  (!)"/>
+                                <ComboBoxItem Content="Family  (>)"/>
+                                <ComboBoxItem Content="Palette  (:)"/>
+                                <ComboBoxItem Content="Quips  (!)"/>
                             </ComboBox>
                         </StackPanel>
 

@@ -229,6 +229,7 @@
                         Margin="4,3,0,3"
                         Padding="5,1"
                         CornerRadius="2"
+                        Width="52"
                         VerticalAlignment="Center">
                     <Border.Style>
                         <Style TargetType="Border">
@@ -245,17 +246,39 @@
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"/>
                 </Border>
-                <!-- Search TextBox -->
-                <TextBox x:Name="SearchBox"
-                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                         Background="Transparent"
-                         BorderThickness="0"
-                         Foreground="{DynamicResource PrimaryText}"
-                         CaretBrush="{DynamicResource PrimaryText}"
-                         Padding="6,6"
-                         FontSize="13"
-                         VerticalAlignment="Center"
-                         PreviewKeyDown="SearchBox_PreviewKeyDown"/>
+                <!-- Search TextBox + Placeholder -->
+                <Grid>
+                    <TextBox x:Name="SearchBox"
+                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Foreground="{DynamicResource PrimaryText}"
+                             CaretBrush="{DynamicResource PrimaryText}"
+                             Padding="6,6"
+                             FontSize="13"
+                             VerticalAlignment="Center"
+                             PreviewKeyDown="SearchBox_PreviewKeyDown"/>
+                    <TextBlock Text="{Binding PlaceholderText}"
+                               IsHitTestVisible="False"
+                               Foreground="{DynamicResource MutedText}"
+                               FontSize="13"
+                               Padding="8,6"
+                               VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SearchText}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding SearchText}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
             </DockPanel>
         </Border>
 

@@ -93,6 +93,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(ShowFavorites));
             OnPropertyChanged(nameof(IsEmptyState));
             OnPropertyChanged(nameof(ModePillText));
+            OnPropertyChanged(nameof(PlaceholderText));
             OnPropertyChanged(nameof(HasModePill));
         }
     }
@@ -104,18 +105,29 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         ? "FILTER"
         : ActiveMode switch
         {
-            ActiveMode.Place => "PLACE",
-            ActiveMode.Command => "CMD",
-            ActiveMode.Shebang => "SHEBANG",
+            ActiveMode.Place => "FAMILY",
+            ActiveMode.Command => "PALETTE",
+            ActiveMode.Shebang => "QUIPS",
             _ => "BROWSER"
         };
 
     public bool HasModePill => true;
 
     /// <summary>
+    /// Dynamic placeholder text for the search box, based on the active mode.
+    /// </summary>
+    public string PlaceholderText => ActiveMode switch
+    {
+        ActiveMode.Place => "Search families to place or edit\u2026",
+        ActiveMode.Command => "Search Revit commands\u2026",
+        ActiveMode.Shebang => "Search quips to run\u2026",
+        _ => "Search views, sheets, and more\u2026"
+    };
+
+    /// <summary>
     /// Returns all possible pill text strings (for measuring uniform pill width at startup).
     /// </summary>
-    public static string[] AllPillTexts => new[] { "BROWSER", "PLACE", "CMD", "SHEBANG", "FILTER" };
+    public static string[] AllPillTexts => new[] { "BROWSER", "FAMILY", "PALETTE", "QUIPS", "FILTER" };
 
     /// <summary>
     /// Called by the view when the user types a prefix character.

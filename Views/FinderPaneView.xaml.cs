@@ -114,6 +114,8 @@ public partial class FinderPaneView : UserControl
 
     /// <summary>
     /// Updates the mode pill border accent color based on the active mode.
+    /// All modes (including Browser) use the same formula:
+    /// border at 100% accent, background at ~22% accent, tinted text.
     /// </summary>
     private void UpdateModePillAccent()
     {
@@ -125,29 +127,27 @@ public partial class FinderPaneView : UserControl
             filterBrush.Freeze();
             ModePillBorder.BorderBrush = filterBrush;
             ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
-            var filterBg = WpfColor.FromArgb((byte)(255 * 0.14), filterColor.R, filterColor.G, filterColor.B);
+            var filterBg = WpfColor.FromArgb((byte)(255 * 0.22), filterColor.R, filterColor.G, filterColor.B);
             ModePillBorder.Background = new SolidColorBrush(filterBg);
-            ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("PillText");
+            ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("FilterPillText");
             return;
         }
 
-        if (App.ViewModel.ActiveMode == ActiveMode.Browser)
-        {
-            // Neutral pill: oxford-blue border all around, no accent tint
-            var pillBorder = (SolidColorBrush)FindResource("PillBorder");
-            ModePillBorder.BorderBrush = pillBorder;
-            ModePillBorder.BorderThickness = new Thickness(1);
-            ModePillBorder.Background = Brushes.Transparent;
-            ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("BrowserPillText");
-            return;
-        }
-
+        // Resolve accent color and text brush for current mode
         WpfColor accentColor = App.ViewModel.ActiveMode switch
         {
             ActiveMode.Place => (WpfColor)FindResource("PlaceAccentColor"),
             ActiveMode.Command => (WpfColor)FindResource("CommandAccentColor"),
             ActiveMode.Shebang => (WpfColor)FindResource("ShebangAccentColor"),
-            _ => WpfColor.FromArgb(0, 0, 0, 0)
+            _ => (WpfColor)FindResource("BrowserAccentColor")
+        };
+
+        string textBrushKey = App.ViewModel.ActiveMode switch
+        {
+            ActiveMode.Place => "PlacePillText",
+            ActiveMode.Command => "CommandPillText",
+            ActiveMode.Shebang => "ShebangPillText",
+            _ => "BrowserPillText"
         };
 
         // All borders use accent color — thicker left for identity signal
@@ -156,12 +156,12 @@ public partial class FinderPaneView : UserControl
         ModePillBorder.BorderBrush = accentBrush;
         ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
 
-        // Accent background tint at 14% — enough to feel intentional
-        var bgColor = WpfColor.FromArgb((byte)(255 * 0.14), accentColor.R, accentColor.G, accentColor.B);
+        // Accent background tint at ~22% opacity
+        var bgColor = WpfColor.FromArgb((byte)(255 * 0.22), accentColor.R, accentColor.G, accentColor.B);
         ModePillBorder.Background = new SolidColorBrush(bgColor);
 
-        // Bright pill text for colored modes
-        ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("PillText");
+        // Mode-tinted text
+        ModePillTextBlock.Foreground = (SolidColorBrush)FindResource(textBrushKey);
     }
 
     // ── Empty State Management ─────────────────────────────────────
