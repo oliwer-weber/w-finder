@@ -439,11 +439,11 @@ public partial class FinderPaneView : UserControl
         {
             SyncListSelections();
 
-            // In Place mode at Type Level, auto-select the highlighted type in Revit
-            // so the Properties pane updates to reflect the family/type.
-            // This is needed for Edit Family to work — Revit requires the type selected.
-            if (App.ViewModel.IsFamilyMode
-                && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.TypeLevel
+            // At Type Level (Place mode or unified family drilldown), auto-select the
+            // highlighted type in Revit so the Properties pane updates to reflect the
+            // family/type. This is needed for Edit Family to work — Revit requires the
+            // type selected.
+            if (App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.TypeLevel
                 && App.ViewModel.HighlightedItem is BrowserItem hi
                 && !hi.IsBackRow
                 && hi.Kind == BrowserItemKind.FamilyType
@@ -760,9 +760,9 @@ public partial class FinderPaneView : UserControl
                     // Save state before executing (pane may hide)
                     SettingsService.SaveLastState((int)App.ViewModel.ActiveMode, App.ViewModel.SearchText);
 
-                    // Two-stage family nav: drill into family at Stage 1
-                    if (App.ViewModel.IsFamilyMode
-                        && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
+                    // Family rollup row → drill into types. TypeCount > 0 marks a rollup
+                    // whether we're in unified Browser or > prefix mode.
+                    if (App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
                         && highlighted.TypeCount > 0)
                     {
                         App.ViewModel.DrillIntoFamily(highlighted);
@@ -778,7 +778,7 @@ public partial class FinderPaneView : UserControl
 
                     UsageStore.RecordUsage(highlighted);
 
-                    if (App.ViewModel.IsShebangMode && highlighted.Kind == BrowserItemKind.Shebang)
+                    if (highlighted.Kind == BrowserItemKind.Shebang)
                     {
                         var shebangId = highlighted.CommandName;
                         if (shebangId == "sf")
@@ -801,7 +801,7 @@ public partial class FinderPaneView : UserControl
                             });
                         }
                     }
-                    else if (App.ViewModel.IsCommandMode && highlighted.Kind == BrowserItemKind.Command)
+                    else if (highlighted.Kind == BrowserItemKind.Command)
                     {
                         var cmdName = highlighted.CommandName;
                         if (cmdName == "__quip_settings")
@@ -867,7 +867,7 @@ public partial class FinderPaneView : UserControl
                             });
                         }
                     }
-                    else if (App.ViewModel.IsFamilyMode && highlighted.Kind == BrowserItemKind.FamilyType)
+                    else if (highlighted.Kind == BrowserItemKind.FamilyType)
                     {
                         RevitBackgroundTask.Raise(uiApp =>
                         {
@@ -916,9 +916,8 @@ public partial class FinderPaneView : UserControl
 
             case Key.Tab:
                 e.Handled = true;
-                // In family mode Stage 1, Tab drills into family (same as Enter)
-                if (App.ViewModel.IsFamilyMode
-                    && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
+                // Family rollup row → Tab drills (same as Enter), regardless of mode
+                if (App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
                     && App.ViewModel.HighlightedItem is BrowserItem familyItem
                     && familyItem.TypeCount > 0)
                 {
@@ -937,9 +936,8 @@ public partial class FinderPaneView : UserControl
                     App.ViewModel.MoveChipFocus(+1);
                     break;
                 }
-                // In family mode Stage 1 with action bar not open, drill into family
+                // Family rollup row → Right drills into types, regardless of mode
                 if (!App.ViewModel.IsActionBarVisible
-                    && App.ViewModel.IsFamilyMode
                     && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
                     && App.ViewModel.HighlightedItem is BrowserItem rightFamilyItem
                     && rightFamilyItem.TypeCount > 0)
@@ -1107,7 +1105,9 @@ public partial class FinderPaneView : UserControl
         // Save state before executing (pane may hide)
         SettingsService.SaveLastState((int)App.ViewModel.ActiveMode, App.ViewModel.SearchText);
 
-        if (App.ViewModel.IsShebangMode && item.Kind == BrowserItemKind.Shebang)
+        UsageStore.RecordUsage(item);
+
+        if (item.Kind == BrowserItemKind.Shebang)
         {
             var shebangId = item.CommandName;
             if (shebangId == "sf")
@@ -1132,7 +1132,7 @@ public partial class FinderPaneView : UserControl
             return;
         }
 
-        if (App.ViewModel.IsFamilyMode && item.Kind == BrowserItemKind.FamilyType)
+        if (item.Kind == BrowserItemKind.FamilyType)
         {
             RevitBackgroundTask.Raise(uiApp =>
             {
@@ -1304,9 +1304,8 @@ public partial class FinderPaneView : UserControl
     {
         if (App.ViewModel.HighlightedItem is BrowserItem item)
         {
-            // Two-stage family nav: double-click drills into family at Stage 1
-            if (App.ViewModel.IsFamilyMode
-                && App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
+            // Family rollup row → double-click drills, regardless of mode
+            if (App.ViewModel.FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
                 && item.TypeCount > 0)
             {
                 App.ViewModel.DrillIntoFamily(item);

@@ -1158,28 +1158,33 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             BrowserItemKind.RevitLink => "LINKS",
             BrowserItemKind.Assembly => "ASSEMBLIES",
             BrowserItemKind.Command => item.RibbonTab?.ToUpperInvariant() ?? "OTHER",
-            BrowserItemKind.Shebang => "COMMANDS",
+            BrowserItemKind.Shebang => "QUIPS",
             _ => "OTHER"
         };
     }
 
     /// <summary>
-    /// Group sort order for Browser mode sections.
+    /// Group sort order for the unified Browser surface — project items first,
+    /// then quips, then Revit commands, then other.
     /// </summary>
-    private static int GetBrowserGroupOrder(string groupKey)
+    private static int GetBrowserGroupOrder(BrowserItem item)
     {
-        return groupKey switch
+        // Special synthetic groups
+        if (item.GroupKey == "RECENT") return 0;
+        if (item.GroupKey == "FAVORITES") return 1;
+
+        return item.Kind switch
         {
-            "RECENT" => 0,
-            "FAVORITES" => 1,
-            "VIEWS" => 2,
-            "SHEETS" => 3,
-            "SCHEDULES" => 4,
-            "FAMILIES" => 5,
-            "GROUPS" => 6,
-            "LINKS" => 7,
-            "ASSEMBLIES" => 8,
-            _ => 9
+            BrowserItemKind.View => 2,
+            BrowserItemKind.Sheet => 3,
+            BrowserItemKind.Schedule => 4,
+            BrowserItemKind.Family or BrowserItemKind.FamilyType => 5,
+            BrowserItemKind.Group => 6,
+            BrowserItemKind.RevitLink => 7,
+            BrowserItemKind.Assembly => 8,
+            BrowserItemKind.Shebang => 9,
+            BrowserItemKind.Command => 10,
+            _ => 11
         };
     }
 
@@ -1207,13 +1212,13 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             var filtered = FuzzyMatcher.Match(_shebangItems, query);
 
             foreach (var item in filtered)
-                item.GroupKey = "COMMANDS";
+                item.GroupKey = "QUIPS";
 
             Results.ReplaceAll(filtered);
 
             StatusText = string.IsNullOrWhiteSpace(query)
-                ? $"{_shebangItems.Count} commands"
-                : $"{filtered.Count} of {_shebangItems.Count} commands";
+                ? $"{_shebangItems.Count} quips"
+                : $"{filtered.Count} of {_shebangItems.Count} quips";
             HighlightedItem = Results.Count > 0 ? Results[0] : null;
         }
         else if (IsCommandMode)
@@ -1245,8 +1250,12 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         }
         else
         {
-            // Browser mode
-            if (string.IsNullOrWhiteSpace(_searchText))
+            // Unified Browser surface
+            if (FamilyNavigationStage == FamilyNavigationStage.TypeLevel && SelectedFamilyForDrilldown != null)
+            {
+                RefreshUnifiedTypeLevel();
+            }
+            else if (string.IsNullOrWhiteSpace(_searchText))
             {
                 // Empty search: show recent items instead of full list
                 RefreshRecentItems();
@@ -1260,21 +1269,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             }
             else
             {
-                var filtered = FuzzyMatcher.Match(_allItems, _searchText);
-                int totalMatched = filtered.Count;
-
-                // Group by item kind and sort groups
-                var grouped = filtered
-                    .Take(MaxResults)
-                    .Select(i => { i.GroupKey = GetGroupKey(i); return i; })
-                    .OrderBy(i => GetBrowserGroupOrder(i.GroupKey))
-                    .ThenBy(i => i.GroupKey)
-                    .ToList();
-
-                Results.ReplaceAll(grouped);
-
-                StatusText = BuildBrowserStatusText(grouped, totalMatched);
-                HighlightedItem = Results.Count > 0 ? Results[0] : null;
+                RefreshUnifiedSearch();
             }
         }
 
@@ -1372,6 +1367,118 @@ public class FinderPaneViewModel : INotifyPropertyChanged
                 : $"{prefix} \u2014 {Results.Count} families ({totalMatched} {(totalMatched == 1 ? "type" : "types")})";
             HighlightedItem = Results.Count > 0 ? Results[0] : null;
         }
+    }
+
+    /// <summary>
+    /// Unified search across project items, families (collapsed by FamilyName), Revit
+    /// commands, and shebangs. Family types are grouped into rollup rows that drill in
+    /// on Enter, matching the > prefix mode's Stage 1 UX.
+    /// </summary>
+    private void RefreshUnifiedSearch()
+    {
+        var query = _searchText.TrimStart();
+
+        // Split _allItems so FamilyTypes can be rolled up after matching.
+        var familyTypes = new List<BrowserItem>();
+        var otherProjectItems = new List<BrowserItem>();
+        foreach (var item in _allItems)
+        {
+            if (item.Kind == BrowserItemKind.FamilyType)
+            {
+                if (!FilterPlacedTypes || item.IsPlacedInProject)
+                    familyTypes.Add(item);
+            }
+            else
+            {
+                otherProjectItems.Add(item);
+            }
+        }
+
+        var matchedOther = FuzzyMatcher.Match(otherProjectItems, query);
+        var matchedFamilyTypes = FuzzyMatcher.Match(familyTypes, query);
+        var matchedCommands = FuzzyMatcher.Match(_commandItems, query);
+        var matchedShebangs = FuzzyMatcher.Match(_shebangItems, query);
+
+        int totalMatched = matchedOther.Count + matchedFamilyTypes.Count
+            + matchedCommands.Count + matchedShebangs.Count;
+
+        // Collapse family-type matches into one rollup row per family.
+        var familyRollups = matchedFamilyTypes
+            .GroupBy(i => new { i.FamilyName, i.Category })
+            .Select(g =>
+            {
+                var first = g.First();
+                return new BrowserItem
+                {
+                    Name = g.Key.FamilyName ?? first.Name,
+                    Category = g.Key.Category ?? "Family",
+                    ElementId = first.ElementId,
+                    Kind = BrowserItemKind.FamilyType,
+                    FamilyName = g.Key.FamilyName,
+                    TypeCount = g.Count()
+                };
+            })
+            .ToList();
+
+        var combined = new List<BrowserItem>(
+            matchedOther.Count + familyRollups.Count + matchedCommands.Count + matchedShebangs.Count);
+        combined.AddRange(matchedOther);
+        combined.AddRange(familyRollups);
+        combined.AddRange(matchedCommands);
+        combined.AddRange(matchedShebangs);
+
+        foreach (var i in combined)
+            i.GroupKey = GetGroupKey(i);
+
+        var grouped = combined
+            .OrderBy(GetBrowserGroupOrder)
+            .ThenBy(i => i.GroupKey, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxResults)
+            .ToList();
+
+        Results.ReplaceAll(grouped);
+        StatusText = BuildBrowserStatusText(grouped, totalMatched);
+        HighlightedItem = Results.Count > 0 ? Results[0] : null;
+    }
+
+    /// <summary>
+    /// Type-level drilldown inside the unified surface. Shows all types of the
+    /// selected family with a back row, mirroring Place mode Stage 2.
+    /// </summary>
+    private void RefreshUnifiedTypeLevel()
+    {
+        if (SelectedFamilyForDrilldown == null) return;
+
+        var types = _allItems
+            .Where(i => i.Kind == BrowserItemKind.FamilyType
+                     && i.FamilyName == SelectedFamilyForDrilldown)
+            .ToList();
+
+        if (FilterPlacedTypes)
+            types = types.Where(i => i.IsPlacedInProject).ToList();
+
+        var resultList = new List<BrowserItem>
+        {
+            new BrowserItem
+            {
+                Name = $"← {SelectedFamilyForDrilldown}",
+                Category = "",
+                ElementId = -1,
+                Kind = BrowserItemKind.FamilyType,
+                IsBackRow = true,
+                GroupKey = SelectedFamilyForDrilldown.ToUpperInvariant()
+            }
+        };
+
+        foreach (var item in types)
+        {
+            item.GroupKey = SelectedFamilyForDrilldown.ToUpperInvariant();
+            resultList.Add(item);
+        }
+
+        Results.ReplaceAll(resultList);
+        StatusText = $"{types.Count} {(types.Count == 1 ? "type" : "types")} in {SelectedFamilyForDrilldown}";
+        HighlightedItem = Results.Count > 1 ? Results[1] : (Results.Count > 0 ? Results[0] : null);
     }
 
     /// <summary>
