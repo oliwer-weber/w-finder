@@ -776,9 +776,7 @@ public partial class FinderPaneView : UserControl
                         break;
                     }
 
-                    // Record usage for recent items
-                    string modeKey = App.ViewModel.ActiveMode.ToString();
-                    RecentItemsStore.RecordUsage(modeKey, highlighted.ElementId, highlighted.Name);
+                    UsageStore.RecordUsage(highlighted);
 
                     if (App.ViewModel.IsShebangMode && highlighted.Kind == BrowserItemKind.Shebang)
                     {

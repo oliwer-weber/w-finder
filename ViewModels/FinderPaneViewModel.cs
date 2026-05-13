@@ -1398,13 +1398,14 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Populates the RecentItems collection from the RecentItemsStore,
+    /// Populates the RecentItems collection from the UsageStore,
     /// resolving stored element IDs back to full BrowserItem objects.
+    /// Stage 3 will replace this with a top-ranked frecency view.
     /// </summary>
     private void RefreshRecentItems()
     {
         RecentItems.Clear();
-        var recents = RecentItemsStore.GetRecents("Browser", 10);
+        var recents = UsageStore.GetRecents(10);
         var itemLookup = new Dictionary<long, BrowserItem>();
         foreach (var i in _allItems)
             itemLookup.TryAdd(i.ElementId, i);

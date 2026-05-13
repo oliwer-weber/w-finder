@@ -44,7 +44,7 @@ public class FinderCommand : IExternalCommand
                     ? doc.GetCloudModelPath().GetModelGUID().ToString()
                     : doc.PathName;
                 if (!string.IsNullOrEmpty(projectKey))
-                    RecentItemsStore.SetProject(projectKey);
+                    UsageStore.SetProject(projectKey);
 
                 var items = BrowserItemCollector.Collect(doc);
                 var favoriteIds = FavoritesStore.Load(doc);
