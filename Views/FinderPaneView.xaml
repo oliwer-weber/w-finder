@@ -223,14 +223,17 @@
                 BorderThickness="1"
                 CornerRadius="2">
             <DockPanel>
-                <!-- Mode Pill (inside search box, left side) -->
+                <!-- Mode Pill (inside search box, left side). Hidden in the default
+                     unified Browser surface; shown when a prefix scope is active or
+                     when an overlay mode (Inspector, Selection Filter) is engaged. -->
                 <Border x:Name="ModePillBorder"
                         DockPanel.Dock="Left"
                         Margin="4,3,0,3"
                         Padding="5,1"
                         CornerRadius="2"
                         Width="52"
-                        VerticalAlignment="Center">
+                        VerticalAlignment="Center"
+                        Visibility="{Binding HasModePill, Converter={StaticResource BoolToVisibility}}">
                     <Border.Style>
                         <Style TargetType="Border">
                             <Setter Property="Background" Value="Transparent"/>
@@ -297,6 +300,9 @@
             </TextBlock>
             <TextBlock FontSize="11" Foreground="{DynamicResource HintText}" Margin="0,2">
                 <Run Text="Type  "/><Run Text=":" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text="  to run commands"/>
+            </TextBlock>
+            <TextBlock FontSize="11" Foreground="{DynamicResource HintText}" Margin="0,2">
+                <Run Text="Type  "/><Run Text="!" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text="  to run quips"/>
             </TextBlock>
         </StackPanel>
 
@@ -438,6 +444,31 @@
                                 </Style.Triggers>
                             </Style>
                         </DockPanel.Style>
+
+                        <!-- Left-edge kind stripe (commands/shebangs only; hidden in filter rows) -->
+                        <Border DockPanel.Dock="Left"
+                                Width="2"
+                                Margin="0,3,6,3"
+                                CornerRadius="1">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Kind}" Value="Command">
+                                            <Setter Property="Background" Value="{DynamicResource CommandAccentBrush}"/>
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Kind}" Value="Shebang">
+                                            <Setter Property="Background" Value="{DynamicResource ShebangAccentBrush}"/>
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding CheckGlyph, Converter={StaticResource NullToCollapsedConverter}}" Value="Visible">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                        </Border>
 
                         <!-- Star button (hidden for commands/shebangs/back rows/family summary rows/filter items) -->
                         <Button Content="{Binding FavoriteIcon}"

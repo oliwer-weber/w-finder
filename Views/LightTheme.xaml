@@ -53,6 +53,9 @@
     <SolidColorBrush x:Key="FilterPillText"        Color="#7a5a1e"/>
     <Color x:Key="InspectAccentColor">#c9933a</Color>
     <SolidColorBrush x:Key="InspectPillText"      Color="#7a5a1e"/>
+    <!-- Brush versions of the accent colors, for per-row kind stripes -->
+    <SolidColorBrush x:Key="CommandAccentBrush"    Color="#7c8c4a"/>
+    <SolidColorBrush x:Key="ShebangAccentBrush"    Color="#744a8c"/>
 
     <!-- Hint text (empty states) -->
     <SolidColorBrush x:Key="HintText"             Color="#5a6d82"/>

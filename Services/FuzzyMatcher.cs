@@ -10,7 +10,16 @@ namespace w_finder.Services;
 public static class FuzzyMatcher
 {
     /// <summary>
+    /// Maximum usage bonus added to the raw text-match score. Keeps usage from
+    /// dominating poor text matches — a brand-new strong match still wins over a
+    /// well-worn weak one.
+    /// </summary>
+    private const int MaxUsageBonus = 10;
+
+    /// <summary>
     /// Returns items that match the query, sorted best-match-first.
+    /// Adds a small frecency bonus (capped) from UsageStore so frequently-used
+    /// items rise within their text-match tier.
     /// </summary>
     public static List<BrowserItem> Match(List<BrowserItem> items, string query)
     {
@@ -30,9 +39,17 @@ public static class FuzzyMatcher
 
             // Name matches are weighted higher than category matches
             int best = Math.Max(nameScore, categoryScore / 2);
+            if (best <= 0) continue;
 
-            if (best > 0)
-                scored.Add((item, best));
+            // Frecency bonus: log-scaled so heavy usage saturates rather than dominates.
+            double usage = UsageStore.GetScore(item);
+            if (usage > 0)
+            {
+                int bonus = (int)Math.Min(MaxUsageBonus, Math.Log(1 + usage) * 3);
+                best += bonus;
+            }
+
+            scored.Add((item, best));
         }
 
         return scored

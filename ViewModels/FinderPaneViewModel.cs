@@ -113,7 +113,15 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             _ => "BROWSER"
         };
 
-    public bool HasModePill => true;
+    /// <summary>
+    /// True when a mode pill should be shown — i.e. a prefix scope is active, or the
+    /// pane is in a special overlay state. Hidden in the default unified Browser surface
+    /// so the search bar is uncluttered when no scope is narrowed.
+    /// </summary>
+    public bool HasModePill =>
+        IsInInspectorMode
+        || IsInSelectionFilterMode
+        || ActiveMode != ActiveMode.Browser;
 
     /// <summary>
     /// Dynamic placeholder text for the search box, based on the active mode.
@@ -355,6 +363,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(ModePillText));
             OnPropertyChanged(nameof(FilterFooterHint));
+            OnPropertyChanged(nameof(HasModePill));
         }
     }
 
@@ -576,6 +585,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(ModePillText));
             OnPropertyChanged(nameof(InspectorFooterHint));
             OnPropertyChanged(nameof(PlaceholderText));
+            OnPropertyChanged(nameof(HasModePill));
         }
     }
 
@@ -985,7 +995,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     public BulkObservableCollection<BrowserItem> Results { get; } = new();
     public BulkObservableCollection<BrowserItem> Favorites { get; } = new();
-    public BulkObservableCollection<BrowserItem> RecentItems { get; } = new();
+    public BulkObservableCollection<BrowserItem> TopRankedItems { get; } = new();
 
     public event Action<BrowserItem>? ItemSelectionRequested;
     public event Action<BrowserItem>? ItemOpenRequested;
@@ -1257,13 +1267,12 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             }
             else if (string.IsNullOrWhiteSpace(_searchText))
             {
-                // Empty search: show recent items instead of full list
-                RefreshRecentItems();
-                var recentList = new List<BrowserItem>(RecentItems);
-                Results.ReplaceAll(recentList);
+                // Empty search: show top-ranked items by frecency
+                RefreshTopRanked();
+                Results.ReplaceAll(TopRankedItems.ToList());
 
-                StatusText = RecentItems.Count > 0
-                    ? $"{_allItems.Count} items · {RecentItems.Count} recent"
+                StatusText = TopRankedItems.Count > 0
+                    ? $"{_allItems.Count} items · {TopRankedItems.Count} top"
                     : $"{_allItems.Count} items loaded.";
                 HighlightedItem = null;
             }
@@ -1505,26 +1514,52 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Populates the RecentItems collection from the UsageStore,
-    /// resolving stored element IDs back to full BrowserItem objects.
-    /// Stage 3 will replace this with a top-ranked frecency view.
+    /// Populates TopRankedItems with the highest-frecency entries across all kinds,
+    /// resolved back to live BrowserItem objects. Used as the unified empty-state.
     /// </summary>
-    private void RefreshRecentItems()
+    private void RefreshTopRanked()
     {
-        RecentItems.Clear();
-        var recents = UsageStore.GetRecents(10);
-        var itemLookup = new Dictionary<long, BrowserItem>();
-        foreach (var i in _allItems)
-            itemLookup.TryAdd(i.ElementId, i);
+        TopRankedItems.Clear();
 
-        foreach (var entry in recents)
+        var entries = UsageStore.GetTopRanked(15);
+        if (entries.Count == 0) return;
+
+        var projLookup = new Dictionary<long, BrowserItem>();
+        foreach (var i in _allItems) projLookup.TryAdd(i.ElementId, i);
+
+        var cmdLookup = new Dictionary<string, BrowserItem>(StringComparer.OrdinalIgnoreCase);
+        foreach (var i in _commandItems)
+            if (i.CommandName != null) cmdLookup.TryAdd(i.CommandName, i);
+
+        var sbgLookup = new Dictionary<string, BrowserItem>(StringComparer.OrdinalIgnoreCase);
+        foreach (var i in _shebangItems)
+            if (i.CommandName != null) sbgLookup.TryAdd(i.CommandName, i);
+
+        var resolved = new List<BrowserItem>();
+        foreach (var entry in entries)
         {
-            if (itemLookup.TryGetValue(entry.ElementId, out var item))
+            BrowserItem? item = null;
+            if (!string.IsNullOrEmpty(entry.StringId))
             {
-                item.GroupKey = "RECENT";
-                RecentItems.Add(item);
+                if (!cmdLookup.TryGetValue(entry.StringId, out item))
+                    sbgLookup.TryGetValue(entry.StringId, out item);
             }
+            else
+            {
+                projLookup.TryGetValue(entry.ElementId, out item);
+            }
+
+            if (item != null) resolved.Add(item);
         }
+
+        foreach (var i in resolved) i.GroupKey = GetGroupKey(i);
+
+        var ordered = resolved
+            .OrderBy(GetBrowserGroupOrder)
+            .ThenBy(i => i.GroupKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var i in ordered) TopRankedItems.Add(i);
     }
 
     /// <summary>
