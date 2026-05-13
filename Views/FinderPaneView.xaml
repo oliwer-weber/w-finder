@@ -693,6 +693,19 @@
                        Foreground="{DynamicResource MutedText}"/>
         </Border>
 
+        <!-- Row 6: Inspector mode hint bar -->
+        <Border x:Name="InspectorHintBar"
+                Grid.Row="6"
+                Visibility="Collapsed"
+                Background="{DynamicResource PaneBackground}"
+                BorderBrush="{DynamicResource SeparatorBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="12,6">
+            <TextBlock Text="{Binding InspectorFooterHint}"
+                       FontSize="10"
+                       Foreground="{DynamicResource MutedText}"/>
+        </Border>
+
         <!-- Inline Rename Overlay -->
         <Border x:Name="InlineRenamePopup"
                 Grid.Row="5"
@@ -753,6 +766,40 @@
                     </TextBox.Style>
                 </TextBox>
             </StackPanel>
+        </Border>
+
+        <!-- Inspector Edit Overlay -->
+        <Border x:Name="InspectorEditPopup"
+                Grid.Row="5"
+                VerticalAlignment="Top"
+                HorizontalAlignment="Stretch"
+                Visibility="Collapsed"
+                Background="{DynamicResource ListBackground}"
+                BorderBrush="{DynamicResource SearchBoxBorderFocus}"
+                BorderThickness="1"
+                CornerRadius="2"
+                Padding="6,4"
+                Margin="8,0,8,0">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Left"
+                           Text="{Binding EditingInspectorParam.Name}"
+                           FontSize="11"
+                           Foreground="{DynamicResource MutedText}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0"
+                           MaxWidth="140"
+                           TextTrimming="CharacterEllipsis"/>
+                <TextBox x:Name="InspectorEditBox"
+                         FontSize="12"
+                         Padding="4,3"
+                         Background="{DynamicResource SearchBoxBackground}"
+                         Foreground="{DynamicResource PrimaryText}"
+                         CaretBrush="{DynamicResource PrimaryText}"
+                         BorderBrush="{DynamicResource SearchBoxBorder}"
+                         BorderThickness="1"
+                         Text="{Binding InspectorEditValue, UpdateSourceTrigger=PropertyChanged}"
+                         PreviewKeyDown="InspectorEditBox_PreviewKeyDown"/>
+            </DockPanel>
         </Border>
 
         <!-- Inline Error Overlay -->

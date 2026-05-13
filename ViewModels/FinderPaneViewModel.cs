@@ -101,7 +101,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>
     /// The display text for the mode pill chip inside the search box.
     /// </summary>
-    public string ModePillText => IsInSelectionFilterMode
+    public string ModePillText => IsInInspectorMode
+        ? "INSPECT"
+        : IsInSelectionFilterMode
         ? "FILTER"
         : ActiveMode switch
         {
@@ -116,18 +118,20 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>
     /// Dynamic placeholder text for the search box, based on the active mode.
     /// </summary>
-    public string PlaceholderText => ActiveMode switch
-    {
-        ActiveMode.Place => "Search families to place or edit\u2026",
-        ActiveMode.Command => "Search Revit commands\u2026",
-        ActiveMode.Shebang => "Search quips to run\u2026",
-        _ => "Search views, sheets, and more\u2026"
-    };
+    public string PlaceholderText => IsInInspectorMode
+        ? "Filter parameters\u2026"
+        : ActiveMode switch
+        {
+            ActiveMode.Place => "Search families to place or edit\u2026",
+            ActiveMode.Command => "Search Revit commands\u2026",
+            ActiveMode.Shebang => "Search quips to run\u2026",
+            _ => "Search views, sheets, and more\u2026"
+        };
 
     /// <summary>
     /// Returns all possible pill text strings (for measuring uniform pill width at startup).
     /// </summary>
-    public static string[] AllPillTexts => new[] { "BROWSER", "FAMILY", "PALETTE", "QUIPS", "FILTER" };
+    public static string[] AllPillTexts => new[] { "BROWSER", "FAMILY", "PALETTE", "QUIPS", "FILTER", "INSPECT" };
 
     /// <summary>
     /// Called by the view when the user types a prefix character.
@@ -559,6 +563,387 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             HighlightedItem = null;
     }
 
+    // ── Property Inspector Mode ─────────────────────────────────────
+
+    private bool _isInInspectorMode;
+    public bool IsInInspectorMode
+    {
+        get => _isInInspectorMode;
+        set
+        {
+            _isInInspectorMode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ModePillText));
+            OnPropertyChanged(nameof(InspectorFooterHint));
+            OnPropertyChanged(nameof(PlaceholderText));
+        }
+    }
+
+    private List<InspectorParameterItem> _inspectorParams = new();
+    private Dictionary<long, InspectorParameterItem> _inspectorParamMap = new();
+    private Stack<(List<InspectorParameterItem> items, string breadcrumb, bool isMixed)> _inspectorNavStack = new();
+
+    /// <summary>Element IDs of the inspected elements (for write-back and refresh).</summary>
+    public List<long> InspectorElementIds { get; set; } = new();
+
+    /// <summary>Total number of inspected elements.</summary>
+    public int InspectorElementCount { get; set; }
+
+    /// <summary>True when in mixed-category mode showing the category picker.</summary>
+    public bool InspectorIsMixedCategory { get; set; }
+
+    /// <summary>Category name currently drilled into (for refresh after edit).</summary>
+    public string? InspectorDrilledCategory { get; set; }
+
+    private string _inspectorBreadcrumb = "INSPECT";
+    public string InspectorBreadcrumb
+    {
+        get => _inspectorBreadcrumb;
+        set { _inspectorBreadcrumb = value; OnPropertyChanged(); }
+    }
+
+    public string InspectorFooterHint
+    {
+        get
+        {
+            if (!IsInInspectorMode) return string.Empty;
+            if (IsInspectorEditMode)
+                return "Enter: save \u00b7 Esc: cancel \u00b7 Tab: next \u00b7 Shift+Tab: prev";
+            return "Enter: edit \u00b7 Esc: close \u00b7 \u2191\u2193: navigate \u00b7 Type: filter";
+        }
+    }
+
+    // ── Inspector Edit Mode ──────────────────────────────────────
+
+    private bool _isInspectorEditMode;
+    public bool IsInspectorEditMode
+    {
+        get => _isInspectorEditMode;
+        set
+        {
+            _isInspectorEditMode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(InspectorFooterHint));
+        }
+    }
+
+    private string _inspectorEditValue = string.Empty;
+    public string InspectorEditValue
+    {
+        get => _inspectorEditValue;
+        set { _inspectorEditValue = value; OnPropertyChanged(); }
+    }
+
+    private InspectorParameterItem? _editingInspectorParam;
+    public InspectorParameterItem? EditingInspectorParam
+    {
+        get => _editingInspectorParam;
+        set { _editingInspectorParam = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// Fired when an inspector edit is confirmed. Code-behind writes to Revit.
+    /// Args: (paramItem, newValue)
+    /// </summary>
+    public event Action<InspectorParameterItem, string>? InspectorEditConfirmed;
+
+    /// <summary>
+    /// Fired when inspector needs a parameter refresh (after edit).
+    /// </summary>
+    public event Action? InspectorRefreshRequested;
+
+    /// <summary>
+    /// Enters inspector mode with the given parameter list.
+    /// </summary>
+    public void EnterInspectorMode(List<InspectorParameterItem> items, string breadcrumb, bool isMixedCategory)
+    {
+        _inspectorParams = items;
+        _inspectorNavStack.Clear();
+        InspectorIsMixedCategory = isMixedCategory;
+        InspectorDrilledCategory = null;
+        InspectorBreadcrumb = $"INSPECT \u00b7 {breadcrumb}";
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+
+        IsInInspectorMode = true;
+        RefreshInspectorDisplay();
+    }
+
+    /// <summary>
+    /// Exits inspector mode and restores normal view.
+    /// </summary>
+    public void ExitInspectorMode()
+    {
+        IsInInspectorMode = false;
+        IsInspectorEditMode = false;
+        EditingInspectorParam = null;
+        _inspectorParams.Clear();
+        _inspectorParamMap.Clear();
+        _inspectorNavStack.Clear();
+        InspectorElementIds.Clear();
+        InspectorIsMixedCategory = false;
+        InspectorDrilledCategory = null;
+        InspectorBreadcrumb = "INSPECT";
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        _debounceTimer.Stop();
+        RefreshResults();
+    }
+
+    /// <summary>
+    /// Drills into a category in mixed-category mode.
+    /// </summary>
+    public void InspectorDrillIn(InspectorParameterItem catItem)
+    {
+        if (!catItem.IsCategoryRow) return;
+
+        // Push current state onto nav stack
+        _inspectorNavStack.Push((_inspectorParams, InspectorBreadcrumb, InspectorIsMixedCategory));
+        InspectorDrilledCategory = catItem.CategoryName;
+
+        // The code-behind will call back with the category's parameters
+        // For now, signal that we need a category drill-in
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+    }
+
+    /// <summary>
+    /// Updates the inspector with drilled-in category parameters.
+    /// Called from code-behind after ParameterCollector.CollectForCategory().
+    /// </summary>
+    public void InspectorShowCategoryParams(List<InspectorParameterItem> items, string breadcrumb)
+    {
+        _inspectorParams = items;
+        InspectorIsMixedCategory = false;
+        InspectorBreadcrumb = $"INSPECT \u00b7 {breadcrumb}";
+        RefreshInspectorDisplay();
+    }
+
+    /// <summary>
+    /// Goes back from a category drill-in to the category list.
+    /// </summary>
+    public void InspectorGoBack()
+    {
+        if (_inspectorNavStack.Count == 0) return;
+
+        var (items, breadcrumb, isMixed) = _inspectorNavStack.Pop();
+        _inspectorParams = items;
+        InspectorIsMixedCategory = isMixed;
+        InspectorDrilledCategory = null;
+        InspectorBreadcrumb = breadcrumb;
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        RefreshInspectorDisplay();
+    }
+
+    /// <summary>
+    /// Enters edit mode for the given parameter.
+    /// </summary>
+    public void EnterInspectorEdit(InspectorParameterItem param)
+    {
+        if (param.IsReadOnly || param.IsDivider || param.IsCategoryRow) return;
+
+        // ElementId params not editable in V1
+        if (param.StorageType == 4) // StorageType.ElementId
+        {
+            ShowInlineError("ElementId parameters \u2014 editing coming in a future update");
+            return;
+        }
+
+        EditingInspectorParam = param;
+        InspectorEditValue = param.IsVaries ? "" : param.DisplayValue;
+        IsInspectorEditMode = true;
+    }
+
+    /// <summary>
+    /// Confirms the current inspector edit.
+    /// </summary>
+    public void ConfirmInspectorEdit()
+    {
+        if (EditingInspectorParam == null) return;
+        InspectorEditConfirmed?.Invoke(EditingInspectorParam, InspectorEditValue);
+        IsInspectorEditMode = false;
+        EditingInspectorParam = null;
+    }
+
+    /// <summary>
+    /// Cancels the current inspector edit.
+    /// </summary>
+    public void CancelInspectorEdit()
+    {
+        IsInspectorEditMode = false;
+        EditingInspectorParam = null;
+        InspectorEditValue = string.Empty;
+    }
+
+    /// <summary>
+    /// Commits edit and moves to next/previous editable parameter.
+    /// direction: +1 for next, -1 for previous.
+    /// </summary>
+    public void CommitAndMoveInspectorEdit(int direction)
+    {
+        if (EditingInspectorParam == null) return;
+
+        // Commit current edit
+        InspectorEditConfirmed?.Invoke(EditingInspectorParam, InspectorEditValue);
+
+        // Find next editable parameter
+        var currentId = HighlightedItem?.ElementId ?? -1;
+        var unified = Results.ToList();
+        int currentIdx = -1;
+        for (int i = 0; i < unified.Count; i++)
+        {
+            if (unified[i].ElementId == currentId)
+            {
+                currentIdx = i;
+                break;
+            }
+        }
+
+        // Search in direction for next editable param
+        IsInspectorEditMode = false;
+        EditingInspectorParam = null;
+
+        if (currentIdx < 0) return;
+
+        for (int i = currentIdx + direction; i >= 0 && i < unified.Count; i += direction)
+        {
+            var item = unified[i];
+            if (_inspectorParamMap.TryGetValue(item.ElementId, out var nextParam))
+            {
+                if (!nextParam.IsReadOnly && !nextParam.IsDivider && !nextParam.IsCategoryRow
+                    && nextParam.StorageType != 4) // not ElementId
+                {
+                    HighlightedItem = item;
+                    EnterInspectorEdit(nextParam);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Replaces the current inspector params (after edit refresh) and preserves highlight.
+    /// </summary>
+    public void RefreshInspectorParams(List<InspectorParameterItem> newParams)
+    {
+        // Remember what parameter was highlighted
+        string? highlightedParamName = null;
+        if (HighlightedItem != null && _inspectorParamMap.TryGetValue(HighlightedItem.ElementId, out var prev))
+            highlightedParamName = prev.Name;
+
+        _inspectorParams = newParams;
+        RefreshInspectorDisplay();
+
+        // Restore highlight by parameter name
+        if (highlightedParamName != null)
+        {
+            foreach (var item in Results)
+            {
+                if (_inspectorParamMap.TryGetValue(item.ElementId, out var param) && param.Name == highlightedParamName)
+                {
+                    HighlightedItem = item;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds BrowserItem wrappers for the current inspector state and populates Results.
+    /// </summary>
+    private void RefreshInspectorDisplay()
+    {
+        int prevHighlightIndex = HighlightedItem != null ? Results.IndexOf(HighlightedItem) : -1;
+
+        _cachedUnifiedList = null;
+        _inspectorParamMap.Clear();
+
+        var sourceParams = _inspectorParams;
+
+        // Apply search filter
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var query = _searchText.ToLowerInvariant();
+            sourceParams = sourceParams.Where(p =>
+                p.Name.ToLowerInvariant().Contains(query)
+                || p.DisplayValue.ToLowerInvariant().Contains(query)
+                || (p.CategoryName != null && p.CategoryName.ToLowerInvariant().Contains(query))
+            ).ToList();
+        }
+
+        var items = new List<BrowserItem>();
+        long nextId = -3000;
+
+        foreach (var param in sourceParams)
+        {
+            var itemId = nextId--;
+            string displayName;
+            string displayCategory;
+
+            if (param.IsDivider)
+            {
+                displayName = param.Name;
+                displayCategory = "";
+            }
+            else if (param.IsCategoryRow)
+            {
+                displayName = param.Name;
+                displayCategory = param.DisplayValue;
+            }
+            else
+            {
+                displayName = param.Name;
+                displayCategory = param.DisplayValue;
+            }
+
+            var item = new BrowserItem
+            {
+                Name = displayName,
+                Category = displayCategory,
+                ElementId = itemId,
+                Kind = BrowserItemKind.Shebang, // hides star button
+                GroupKey = param.IsCategoryRow
+                    ? "CATEGORIES"
+                    : param.IsDivider
+                        ? "" // dividers don't group
+                        : param.GroupName.ToUpperInvariant()
+            };
+
+            items.Add(item);
+            _inspectorParamMap[itemId] = param;
+        }
+
+        Results.ReplaceAll(items);
+
+        // Status text
+        if (InspectorIsMixedCategory)
+            StatusText = $"{InspectorBreadcrumb}";
+        else
+            StatusText = $"{InspectorBreadcrumb} \u2014 {sourceParams.Count(p => !p.IsDivider)} parameters";
+
+        // Restore highlight
+        if (prevHighlightIndex >= 0 && prevHighlightIndex < Results.Count)
+            HighlightedItem = Results[prevHighlightIndex];
+        else if (Results.Count > 0)
+            HighlightedItem = Results[0];
+        else
+            HighlightedItem = null;
+    }
+
+    /// <summary>
+    /// Gets the InspectorParameterItem for the currently highlighted BrowserItem.
+    /// </summary>
+    public InspectorParameterItem? GetInspectorParam(BrowserItem? item)
+    {
+        if (item == null) return null;
+        _inspectorParamMap.TryGetValue(item.ElementId, out var param);
+        return param;
+    }
+
     // ── Family input parsing ────────────────────────────────────────
 
     /// <summary>
@@ -806,6 +1191,13 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         if (IsInSelectionFilterMode)
         {
             RefreshFilterDisplay();
+            return;
+        }
+
+        // In inspector mode, route to inspector display
+        if (IsInInspectorMode)
+        {
+            RefreshInspectorDisplay();
             return;
         }
 

@@ -52,6 +52,8 @@
     <SolidColorBrush x:Key="CommandPillText"       Color="#a6b87a"/>
     <SolidColorBrush x:Key="ShebangPillText"       Color="#a47ab8"/>
     <SolidColorBrush x:Key="FilterPillText"        Color="#d4a85a"/>
+    <Color x:Key="InspectAccentColor">#c9933a</Color>
+    <SolidColorBrush x:Key="InspectPillText"      Color="#d4a85a"/>
 
     <!-- Hint text (empty states) -->
     <SolidColorBrush x:Key="HintText"             Color="#7a8a9e"/>

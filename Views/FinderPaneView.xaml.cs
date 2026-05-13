@@ -35,6 +35,8 @@ public partial class FinderPaneView : UserControl
         App.ViewModel.ShortcutEditConfirmed += OnShortcutEditConfirmed;
         App.ViewModel.ExcelExportConfirmed += OnExcelExportConfirmed;
         App.ViewModel.RefreshRequested += OnRefreshRequested;
+        App.ViewModel.InspectorEditConfirmed += OnInspectorEditConfirmed;
+        App.ViewModel.InspectorRefreshRequested += OnInspectorRefreshRequested;
 
         ApplyTheme(SettingsService.Current.IsDarkMode);
 
@@ -119,6 +121,20 @@ public partial class FinderPaneView : UserControl
     /// </summary>
     private void UpdateModePillAccent()
     {
+        // Inspector mode uses warm amber/gold accent (same family as Filter)
+        if (App.ViewModel.IsInInspectorMode)
+        {
+            var inspectColor = (WpfColor)FindResource("InspectAccentColor");
+            var inspectBrush = new SolidColorBrush(inspectColor);
+            inspectBrush.Freeze();
+            ModePillBorder.BorderBrush = inspectBrush;
+            ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
+            var inspectBg = WpfColor.FromArgb((byte)(255 * 0.22), inspectColor.R, inspectColor.G, inspectColor.B);
+            ModePillBorder.Background = new SolidColorBrush(inspectBg);
+            ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("InspectPillText");
+            return;
+        }
+
         // Selection filter mode uses its own amber/gold accent
         if (App.ViewModel.IsInSelectionFilterMode)
         {
@@ -320,8 +336,14 @@ public partial class FinderPaneView : UserControl
 
         view.GroupDescriptions.Clear();
 
-        // Group by GroupKey for all modes except Shebang and Selection Filter
-        if (!App.ViewModel.IsShebangMode && !App.ViewModel.IsInSelectionFilterMode)
+        // Group by GroupKey for all modes except Shebang, Selection Filter, and Inspector
+        if (!App.ViewModel.IsShebangMode && !App.ViewModel.IsInSelectionFilterMode
+            && !App.ViewModel.IsInInspectorMode)
+        {
+            view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BrowserItem.GroupKey)));
+        }
+        // Inspector uses grouping for parameter groups
+        else if (App.ViewModel.IsInInspectorMode && !App.ViewModel.InspectorIsMixedCategory)
         {
             view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BrowserItem.GroupKey)));
         }
@@ -366,6 +388,36 @@ public partial class FinderPaneView : UserControl
                 ? WpfVisibility.Visible : WpfVisibility.Collapsed;
             UpdateModePillAccent();
             UpdateResultGrouping();
+            return;
+        }
+
+        if (e.PropertyName == nameof(FinderPaneViewModel.IsInInspectorMode))
+        {
+            InspectorHintBar.Visibility = App.ViewModel.IsInInspectorMode
+                ? WpfVisibility.Visible : WpfVisibility.Collapsed;
+            UpdateModePillAccent();
+            UpdateResultGrouping();
+            return;
+        }
+
+        if (e.PropertyName == nameof(FinderPaneViewModel.IsInspectorEditMode))
+        {
+            if (App.ViewModel.IsInspectorEditMode)
+            {
+                PositionOverlay(InspectorEditPopup);
+                Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+                {
+                    InspectorEditBox.Focus();
+                    Keyboard.Focus(InspectorEditBox);
+                    InspectorEditBox.SelectAll();
+                });
+            }
+            else
+            {
+                InspectorEditPopup.Visibility = WpfVisibility.Collapsed;
+                SearchBox.Focus();
+                Keyboard.Focus(SearchBox);
+            }
             return;
         }
 
@@ -450,8 +502,13 @@ public partial class FinderPaneView : UserControl
 
     private void PositionOverlay(Border overlay)
     {
-        bool shouldShow = overlay == InlineRenamePopup ? App.ViewModel.IsInlineRenameVisible
-            : App.ViewModel.HasInlineError;
+        bool shouldShow;
+        if (overlay == InlineRenamePopup)
+            shouldShow = App.ViewModel.IsInlineRenameVisible;
+        else if (overlay == InspectorEditPopup)
+            shouldShow = App.ViewModel.IsInspectorEditMode;
+        else
+            shouldShow = App.ViewModel.HasInlineError;
 
         if (!shouldShow)
         {
@@ -554,8 +611,16 @@ public partial class FinderPaneView : UserControl
 
     private void SearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        // Selection filter mode intercepts all keys first
         var vm = App.ViewModel;
+
+        // Inspector mode intercepts keys first
+        if (vm.IsInInspectorMode)
+        {
+            HandleInspectorKeyDown(e);
+            return;
+        }
+
+        // Selection filter mode intercepts all keys first
         if (vm.IsInSelectionFilterMode)
         {
             switch (e.Key)
@@ -721,6 +786,11 @@ public partial class FinderPaneView : UserControl
                         if (shebangId == "sf")
                         {
                             LaunchSelectionFilter();
+                            break;
+                        }
+                        if (shebangId == "pi")
+                        {
+                            LaunchPropertyInspector();
                             break;
                         }
                         if (shebangId != null)
@@ -1045,6 +1115,11 @@ public partial class FinderPaneView : UserControl
             if (shebangId == "sf")
             {
                 LaunchSelectionFilter();
+                return;
+            }
+            if (shebangId == "pi")
+            {
+                LaunchPropertyInspector();
                 return;
             }
             if (shebangId != null)
@@ -1664,5 +1739,340 @@ public partial class FinderPaneView : UserControl
             SearchBox.Focus();
             Keyboard.Focus(SearchBox);
         });
+    }
+
+    // ── Property Inspector ────────────────────────────────────────
+
+    /// <summary>
+    /// Reads the current Revit selection and enters inspector mode.
+    /// </summary>
+    private void LaunchPropertyInspector()
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var uidoc = uiApp.ActiveUIDocument;
+            if (uidoc == null) return;
+
+            var selIds = uidoc.Selection.GetElementIds();
+            if (selIds.Count == 0)
+            {
+                Dispatcher.Invoke(() =>
+                    App.ViewModel.ShowInlineError("Select elements in the model first"));
+                return;
+            }
+
+            var doc = uidoc.Document;
+            var (items, breadcrumb, isMixed) = ParameterCollector.Collect(doc, selIds);
+
+            var elementIdList = selIds.Select(id => id.Value).ToList();
+
+            Dispatcher.Invoke(() =>
+            {
+                App.ViewModel.InspectorElementIds = elementIdList;
+                App.ViewModel.InspectorElementCount = elementIdList.Count;
+                App.ViewModel.EnterInspectorMode(items, breadcrumb, isMixed);
+                UpdateModePillAccent();
+                UpdateResultGrouping();
+            });
+        });
+    }
+
+    /// <summary>
+    /// Handles all keyboard input while in inspector mode.
+    /// </summary>
+    private void HandleInspectorKeyDown(KeyEventArgs e)
+    {
+        var vm = App.ViewModel;
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                e.Handled = true;
+                if (vm.IsInspectorEditMode)
+                {
+                    vm.CancelInspectorEdit();
+                }
+                else if (vm.InspectorDrilledCategory != null)
+                {
+                    vm.InspectorGoBack();
+                }
+                else
+                {
+                    vm.ExitInspectorMode();
+                    UpdateModePillAccent();
+                    UpdateResultGrouping();
+                }
+                return;
+
+            case Key.Enter:
+                e.Handled = true;
+                if (vm.HighlightedItem == null) return;
+
+                var param = vm.GetInspectorParam(vm.HighlightedItem);
+                if (param == null) return;
+
+                // Category row → drill in
+                if (param.IsCategoryRow)
+                {
+                    vm.InspectorDrillIn(param);
+                    InspectorDrillIntoCategory(param);
+                    return;
+                }
+
+                // Divider → no-op
+                if (param.IsDivider) return;
+
+                // Read-only → hint
+                if (param.IsReadOnly)
+                {
+                    if (param.StorageType == 4) // ElementId
+                        vm.ShowInlineError("ElementId parameters \u2014 editing coming in a future update");
+                    else
+                        vm.ShowInlineError("Read-only parameter");
+                    return;
+                }
+
+                // Enter edit mode
+                vm.EnterInspectorEdit(param);
+                return;
+
+            case Key.Space:
+                e.Handled = true;
+                if (vm.HighlightedItem == null) return;
+
+                var spaceParam = vm.GetInspectorParam(vm.HighlightedItem);
+                if (spaceParam is { IsYesNo: true, IsReadOnly: false })
+                {
+                    OnInspectorToggleRequested(spaceParam);
+                }
+                return;
+
+            case Key.Right:
+                if (vm.InspectorIsMixedCategory && vm.HighlightedItem != null)
+                {
+                    e.Handled = true;
+                    var rightParam = vm.GetInspectorParam(vm.HighlightedItem);
+                    if (rightParam is { IsCategoryRow: true })
+                    {
+                        vm.InspectorDrillIn(rightParam);
+                        InspectorDrillIntoCategory(rightParam);
+                    }
+                }
+                return;
+
+            case Key.Left:
+                if (vm.InspectorDrilledCategory != null)
+                {
+                    e.Handled = true;
+                    vm.InspectorGoBack();
+                }
+                return;
+
+            case Key.Back:
+                if (string.IsNullOrEmpty(vm.SearchText))
+                {
+                    if (vm.InspectorDrilledCategory != null)
+                    {
+                        e.Handled = true;
+                        vm.InspectorGoBack();
+                    }
+                    // else: don't exit inspector on backspace — use Escape
+                }
+                return;
+
+            case Key.Up:
+                e.Handled = true;
+                vm.MoveHighlight(-1);
+                // Skip divider rows
+                SkipInspectorDividers(-1);
+                ScrollHighlightedIntoView();
+                return;
+
+            case Key.Down:
+                e.Handled = true;
+                vm.MoveHighlight(1);
+                SkipInspectorDividers(1);
+                ScrollHighlightedIntoView();
+                return;
+        }
+
+        // All other keys: let typing through for search filtering
+    }
+
+    /// <summary>
+    /// Skips divider rows when navigating with arrow keys.
+    /// </summary>
+    private void SkipInspectorDividers(int direction)
+    {
+        var vm = App.ViewModel;
+        if (vm.HighlightedItem == null) return;
+
+        var param = vm.GetInspectorParam(vm.HighlightedItem);
+        if (param is { IsDivider: true })
+        {
+            vm.MoveHighlight(direction);
+        }
+    }
+
+    /// <summary>
+    /// Drills into a category from the mixed-category picker.
+    /// Calls ParameterCollector on the Revit API thread, then updates ViewModel.
+    /// </summary>
+    private void InspectorDrillIntoCategory(InspectorParameterItem catItem)
+    {
+        if (catItem.CategoryName == null || catItem.ElementIds.Count == 0) return;
+
+        var categoryName = catItem.CategoryName;
+        var elementIds = catItem.ElementIds.ToList();
+        int totalCount = App.ViewModel.InspectorElementCount;
+
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var (items, breadcrumb) = ParameterCollector.CollectForCategory(
+                doc, categoryName, elementIds, totalCount);
+
+            Dispatcher.Invoke(() =>
+            {
+                App.ViewModel.InspectorShowCategoryParams(items, breadcrumb);
+                UpdateResultGrouping();
+            });
+        });
+    }
+
+    /// <summary>
+    /// Handles keyboard input in the inspector edit TextBox.
+    /// </summary>
+    private void InspectorEditBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var vm = App.ViewModel;
+
+        switch (e.Key)
+        {
+            case Key.Enter:
+                e.Handled = true;
+                vm.ConfirmInspectorEdit();
+                break;
+
+            case Key.Escape:
+                e.Handled = true;
+                vm.CancelInspectorEdit();
+                break;
+
+            case Key.Tab:
+                e.Handled = true;
+                int direction = Keyboard.Modifiers == ModifierKeys.Shift ? -1 : 1;
+                vm.CommitAndMoveInspectorEdit(direction);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Called when an inspector edit is confirmed — writes the value to Revit.
+    /// </summary>
+    private void OnInspectorEditConfirmed(InspectorParameterItem paramItem, string newValue)
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var (success, message) = ParameterWriter.Write(doc, paramItem, newValue);
+
+            Dispatcher.Invoke(() =>
+            {
+                if (success)
+                    App.ViewModel.ShowInlineSuccess(message);
+                else
+                    App.ViewModel.ShowInlineError(message);
+            });
+
+            // Refresh parameters after edit
+            if (success)
+                RefreshInspectorParams(uiApp);
+        });
+    }
+
+    /// <summary>
+    /// Called when a Yes/No parameter toggle is requested.
+    /// </summary>
+    private void OnInspectorToggleRequested(InspectorParameterItem paramItem)
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var (success, message) = ParameterWriter.ToggleYesNo(doc, paramItem);
+
+            Dispatcher.Invoke(() =>
+            {
+                if (success)
+                    App.ViewModel.ShowInlineSuccess(message);
+                else
+                    App.ViewModel.ShowInlineError(message);
+            });
+
+            if (success)
+                RefreshInspectorParams(uiApp);
+        });
+    }
+
+    /// <summary>
+    /// Called when inspector needs a full parameter refresh (triggered by ViewModel event).
+    /// </summary>
+    private void OnInspectorRefreshRequested()
+    {
+        RevitBackgroundTask.Raise(uiApp => RefreshInspectorParams(uiApp));
+    }
+
+    /// <summary>
+    /// Re-reads parameters from Revit and updates the inspector display.
+    /// Preserves scroll position and highlighted parameter.
+    /// Must be called on the Revit API thread.
+    /// </summary>
+    private void RefreshInspectorParams(UIApplication uiApp)
+    {
+        var doc = uiApp.ActiveUIDocument?.Document;
+        if (doc == null) return;
+
+        var vm = App.ViewModel;
+        var elementIds = vm.InspectorElementIds;
+        if (elementIds.Count == 0) return;
+
+        // If drilled into a category, refresh just that category
+        if (vm.InspectorDrilledCategory != null)
+        {
+            // Find element IDs for the drilled category
+            var catElementIds = elementIds; // use all — ParameterCollector filters by category
+            var (items, breadcrumb) = ParameterCollector.CollectForCategory(
+                doc, vm.InspectorDrilledCategory, catElementIds, vm.InspectorElementCount);
+
+            Dispatcher.Invoke(() =>
+            {
+                vm.RefreshInspectorParams(items);
+            });
+        }
+        else
+        {
+            var revitIds = elementIds.Select(id => new ElementId(id)).ToList();
+            var (items, breadcrumb, isMixed) = ParameterCollector.Collect(doc, revitIds);
+
+            Dispatcher.Invoke(() =>
+            {
+                if (isMixed)
+                {
+                    // Don't refresh category list after edit — shouldn't happen
+                    // but just in case, re-enter with updated data
+                    vm.RefreshInspectorParams(items);
+                }
+                else
+                {
+                    vm.RefreshInspectorParams(items);
+                }
+            });
+        }
     }
 }
