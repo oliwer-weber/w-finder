@@ -292,19 +292,13 @@
                    Text="{Binding StatusText}"
                    Margin="12,4,12,2"/>
 
-        <!-- Row 2: Browser mode hints (above favorites, close to search bar) -->
-        <StackPanel x:Name="BrowserHints" Grid.Row="2" Margin="12,4,12,0"
-                    Visibility="Collapsed">
-            <TextBlock FontSize="11" Foreground="{DynamicResource HintText}" Margin="0,2">
-                <Run Text="Type  "/><Run Text=">" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text="  to place families"/>
-            </TextBlock>
-            <TextBlock FontSize="11" Foreground="{DynamicResource HintText}" Margin="0,2">
-                <Run Text="Type  "/><Run Text=":" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text="  to run commands"/>
-            </TextBlock>
-            <TextBlock FontSize="11" Foreground="{DynamicResource HintText}" Margin="0,2">
-                <Run Text="Type  "/><Run Text="!" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text="  to run quips"/>
-            </TextBlock>
-        </StackPanel>
+        <!-- Row 2: Browser mode hints (one compact line; wraps if pane is narrow) -->
+        <TextBlock x:Name="BrowserHints" Grid.Row="2" Margin="12,4,12,0"
+                   FontSize="11" Foreground="{DynamicResource HintText}"
+                   TextWrapping="Wrap"
+                   Visibility="Collapsed">
+            <Run Text="Type "/><Run Text=">" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text=" families  ·  "/><Run Text=":" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text=" commands  ·  "/><Run Text="!" Foreground="{DynamicResource HintKeyText}" FontWeight="SemiBold"/><Run Text=" quips"/>
+        </TextBlock>
 
         <!-- Row 3: Favorites section -->
         <Border Grid.Row="3"

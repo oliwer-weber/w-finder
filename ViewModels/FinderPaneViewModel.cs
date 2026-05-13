@@ -1387,7 +1387,10 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     {
         var query = _searchText.TrimStart();
 
-        // Split _allItems so FamilyTypes can be rolled up after matching.
+        // Split _allItems so FamilyTypes can be rolled up after matching. The bare
+        // BrowserItemKind.Family node duplicates what each rollup row already
+        // represents (same name, same drill behavior) — exclude it here so a search
+        // like "panel" doesn't surface both "Panel" and "Panel (N types)".
         var familyTypes = new List<BrowserItem>();
         var otherProjectItems = new List<BrowserItem>();
         foreach (var item in _allItems)
@@ -1396,6 +1399,10 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             {
                 if (!FilterPlacedTypes || item.IsPlacedInProject)
                     familyTypes.Add(item);
+            }
+            else if (item.Kind == BrowserItemKind.Family)
+            {
+                continue;
             }
             else
             {
