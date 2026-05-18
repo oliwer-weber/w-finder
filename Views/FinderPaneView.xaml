@@ -348,6 +348,124 @@
             </Expander>
         </Border>
 
+        <!-- Row 4: Parameter Filter form (!pf) -->
+        <Border x:Name="ParamFilterPanel"
+                Grid.Row="4"
+                Visibility="{Binding IsInParameterFilterMode, Converter={StaticResource BoolToVisibility}}"
+                Margin="8,4"
+                Background="{DynamicResource FavoritesBackground}"
+                CornerRadius="2"
+                Padding="0,4">
+            <StackPanel>
+                <!-- Scope row -->
+                <Border Padding="10,5">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="BorderThickness" Value="2,0,0,0"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsParamScopeFocused}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource SearchBoxBorderFocus}"/>
+                                    <Setter Property="Background" Value="{DynamicResource ItemHoverBackground}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="SCOPE" Width="76"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource SectionHeaderText}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding ParamFilterScopeLabel}"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+                <!-- Parameter row -->
+                <Border Padding="10,5">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="BorderThickness" Value="2,0,0,0"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsParamParameterFocused}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource SearchBoxBorderFocus}"/>
+                                    <Setter Property="Background" Value="{DynamicResource ItemHoverBackground}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="PARAMETER" Width="76"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource SectionHeaderText}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding ParamFilterParameterLabel}"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+                <!-- Rule row -->
+                <Border Padding="10,5">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="BorderThickness" Value="2,0,0,0"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsParamRuleFocused}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource SearchBoxBorderFocus}"/>
+                                    <Setter Property="Background" Value="{DynamicResource ItemHoverBackground}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="RULE" Width="76"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource SectionHeaderText}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding ParamFilterRuleLabel}"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+                <!-- Value row -->
+                <Border Padding="10,5">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="BorderThickness" Value="2,0,0,0"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsParamValueFocused}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource SearchBoxBorderFocus}"/>
+                                    <Setter Property="Background" Value="{DynamicResource ItemHoverBackground}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="VALUE" Width="76"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource SectionHeaderText}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding ParamFilterValueLabel}"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource PrimaryText}"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+            </StackPanel>
+        </Border>
+
         <!-- Row 4: Empty states -->
         <Border x:Name="EmptyStatePanel"
                 Grid.Row="4"
@@ -727,6 +845,19 @@
                 BorderThickness="0,1,0,0"
                 Padding="12,6">
             <TextBlock Text="{Binding InspectorFooterHint}"
+                       FontSize="10"
+                       Foreground="{DynamicResource MutedText}"/>
+        </Border>
+
+        <!-- Row 6: Parameter Filter mode hint bar -->
+        <Border x:Name="ParamFilterHintBar"
+                Grid.Row="6"
+                Visibility="Collapsed"
+                Background="{DynamicResource PaneBackground}"
+                BorderBrush="{DynamicResource SeparatorBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="12,6">
+            <TextBlock Text="{Binding ParamFilterFooterHint}"
                        FontSize="10"
                        Foreground="{DynamicResource MutedText}"/>
         </Border>

@@ -26,22 +26,30 @@ public static class FuzzyMatcher
         if (string.IsNullOrWhiteSpace(query))
             return items;
 
-        // Compute queryLower once — not per item.
+        return MatchScored(items, query).Select(s => s.Item).ToList();
+    }
+
+    /// <summary>
+    /// Same as <see cref="Match"/> but returns the score alongside each item so callers
+    /// can rank groups by their best-scoring member instead of by Kind precedence.
+    /// </summary>
+    public static List<(BrowserItem Item, int Score)> MatchScored(List<BrowserItem> items, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return items.Select(i => (i, 0)).ToList();
+
         string queryLower = query.ToLowerInvariant();
 
         var scored = new List<(BrowserItem Item, int Score)>();
 
         foreach (var item in items)
         {
-            // Use pre-lowercased fields to avoid per-item allocations.
             int nameScore = ScoreMatch(item.Name, item.NameLower, queryLower);
             int categoryScore = ScoreMatch(item.Category, item.CategoryLower, queryLower);
 
-            // Name matches are weighted higher than category matches
             int best = Math.Max(nameScore, categoryScore / 2);
             if (best <= 0) continue;
 
-            // Frecency bonus: log-scaled so heavy usage saturates rather than dominates.
             double usage = UsageStore.GetScore(item);
             if (usage > 0)
             {
@@ -54,7 +62,6 @@ public static class FuzzyMatcher
 
         return scored
             .OrderByDescending(s => s.Score)
-            .Select(s => s.Item)
             .ToList();
     }
 
@@ -104,9 +111,15 @@ public static class FuzzyMatcher
         if (qi < queryLower.Length)
             return 0;
 
-        // Exact prefix bonus
+        // Exact prefix bonus, or contiguous-substring-anywhere bonus.
+        // The substring bonus rewards "close in" appearing intact inside
+        // "Close Inactive Views" even though it isn't at the start — keeping
+        // it well above scattered-letter subsequence matches like
+        // "Calloutsymbol detail number, drawing number".
         if (targetLower.StartsWith(queryLower))
             score += 10;
+        else if (queryLower.Length > 1 && targetLower.Contains(queryLower))
+            score += 8;
 
         return score;
     }

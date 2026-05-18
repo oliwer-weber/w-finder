@@ -18,6 +18,7 @@ public static class ShebangService
         ("pin", "Pin All Levels, Grids & Links", "Model"),
         ("sf", "Selection Filter", "Selection"),
         ("pi", "Property Inspector", "Properties"),
+        ("pf", "Parameter Filter", "Selection"),
     };
 
     /// <summary>
@@ -65,6 +66,9 @@ public static class ShebangService
                 break;
             case "pi":
                 // Interactive inspector — handled by code-behind, not here.
+                break;
+            case "pf":
+                // Interactive parameter filter — handled by code-behind, not here.
                 break;
         }
     }

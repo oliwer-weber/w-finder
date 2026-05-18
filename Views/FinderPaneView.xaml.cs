@@ -37,6 +37,8 @@ public partial class FinderPaneView : UserControl
         App.ViewModel.RefreshRequested += OnRefreshRequested;
         App.ViewModel.InspectorEditConfirmed += OnInspectorEditConfirmed;
         App.ViewModel.InspectorRefreshRequested += OnInspectorRefreshRequested;
+        App.ViewModel.ParamFilterParamSelected += OnParamFilterParamSelected;
+        App.ViewModel.ParamFilterExecuteRequested += OnParamFilterExecuteRequested;
 
         ApplyTheme(SettingsService.Current.IsDarkMode);
 
@@ -121,6 +123,20 @@ public partial class FinderPaneView : UserControl
     /// </summary>
     private void UpdateModePillAccent()
     {
+        // Parameter Filter mode reuses the Filter family accent (gold/amber)
+        if (App.ViewModel.IsInParameterFilterMode)
+        {
+            var pfColor = (WpfColor)FindResource("FilterAccentColor");
+            var pfBrush = new SolidColorBrush(pfColor);
+            pfBrush.Freeze();
+            ModePillBorder.BorderBrush = pfBrush;
+            ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
+            var pfBg = WpfColor.FromArgb((byte)(255 * 0.22), pfColor.R, pfColor.G, pfColor.B);
+            ModePillBorder.Background = new SolidColorBrush(pfBg);
+            ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("FilterPillText");
+            return;
+        }
+
         // Inspector mode uses warm amber/gold accent (same family as Filter)
         if (App.ViewModel.IsInInspectorMode)
         {
@@ -336,9 +352,10 @@ public partial class FinderPaneView : UserControl
 
         view.GroupDescriptions.Clear();
 
-        // Group by GroupKey for all modes except Shebang, Selection Filter, and Inspector
+        // Group by GroupKey for all modes except Shebang, Selection Filter, Inspector,
+        // and Parameter Filter (the last two have their own flat layouts).
         if (!App.ViewModel.IsShebangMode && !App.ViewModel.IsInSelectionFilterMode
-            && !App.ViewModel.IsInInspectorMode)
+            && !App.ViewModel.IsInInspectorMode && !App.ViewModel.IsInParameterFilterMode)
         {
             view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BrowserItem.GroupKey)));
         }
@@ -385,6 +402,15 @@ public partial class FinderPaneView : UserControl
         if (e.PropertyName == nameof(FinderPaneViewModel.IsInSelectionFilterMode))
         {
             FilterHintBar.Visibility = App.ViewModel.IsInSelectionFilterMode
+                ? WpfVisibility.Visible : WpfVisibility.Collapsed;
+            UpdateModePillAccent();
+            UpdateResultGrouping();
+            return;
+        }
+
+        if (e.PropertyName == nameof(FinderPaneViewModel.IsInParameterFilterMode))
+        {
+            ParamFilterHintBar.Visibility = App.ViewModel.IsInParameterFilterMode
                 ? WpfVisibility.Visible : WpfVisibility.Collapsed;
             UpdateModePillAccent();
             UpdateResultGrouping();
@@ -613,6 +639,13 @@ public partial class FinderPaneView : UserControl
     {
         var vm = App.ViewModel;
 
+        // Parameter Filter mode intercepts keys first
+        if (vm.IsInParameterFilterMode)
+        {
+            HandleParameterFilterKeyDown(e);
+            return;
+        }
+
         // Inspector mode intercepts keys first
         if (vm.IsInInspectorMode)
         {
@@ -789,6 +822,11 @@ public partial class FinderPaneView : UserControl
                         if (shebangId == "pi")
                         {
                             LaunchPropertyInspector();
+                            break;
+                        }
+                        if (shebangId == "pf")
+                        {
+                            LaunchParameterFilter();
                             break;
                         }
                         if (shebangId != null)
@@ -1118,6 +1156,11 @@ public partial class FinderPaneView : UserControl
             if (shebangId == "pi")
             {
                 LaunchPropertyInspector();
+                return;
+            }
+            if (shebangId == "pf")
+            {
+                LaunchParameterFilter();
                 return;
             }
             if (shebangId != null)
@@ -2071,5 +2114,183 @@ public partial class FinderPaneView : UserControl
                 }
             });
         }
+    }
+
+    // ── Parameter Filter (!pf) ─────────────────────────────────────
+
+    /// <summary>
+    /// Builds the parameter-name index on the Revit thread and enters Parameter
+    /// Filter mode. Shows a transient "Indexing…" hint so the UI feels responsive.
+    /// </summary>
+    private void LaunchParameterFilter()
+    {
+        App.ViewModel.ShowInlineSuccess("Indexing parameters…");
+
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var uidoc = uiApp.ActiveUIDocument;
+            if (uidoc == null) return;
+            var doc = uidoc.Document;
+            var view = uidoc.ActiveView;
+
+            // Default scope when entering is EntireProject — index against that.
+            var names = ParameterFilterService.CollectParameterNames(
+                doc, ParamFilterScope.EntireProject, view);
+
+            Dispatcher.Invoke(() =>
+            {
+                App.ViewModel.ClearInlineError();
+                App.ViewModel.EnterParameterFilterMode(names);
+                UpdateModePillAccent();
+                UpdateResultGrouping();
+            });
+        });
+    }
+
+    /// <summary>
+    /// All keyboard handling while in Parameter Filter mode.
+    /// </summary>
+    private void HandleParameterFilterKeyDown(KeyEventArgs e)
+    {
+        var vm = App.ViewModel;
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                e.Handled = true;
+                vm.ExitParameterFilterMode();
+                UpdateModePillAccent();
+                UpdateResultGrouping();
+                return;
+
+            case Key.Tab:
+                e.Handled = true;
+                int direction = Keyboard.Modifiers == ModifierKeys.Shift ? -1 : 1;
+                // Auto-commit a typed Value before moving away.
+                if (vm.ParamFilterFocus == ParamFilterField.Value)
+                    vm.ParamFilterCommitTyped();
+                vm.ParamFilterMoveFocus(direction);
+                return;
+
+            case Key.Up:
+                e.Handled = true;
+                vm.MoveHighlight(-1);
+                ScrollHighlightedIntoView();
+                return;
+
+            case Key.Down:
+                e.Handled = true;
+                vm.MoveHighlight(1);
+                ScrollHighlightedIntoView();
+                return;
+
+            case Key.Enter:
+                e.Handled = true;
+                // Value field with rule that takes a value: commit typed text if any,
+                // else commit dropdown highlight. Then execute when fields are valid.
+                if (vm.ParamFilterFocus == ParamFilterField.Value)
+                {
+                    if (!string.IsNullOrWhiteSpace(vm.SearchText))
+                        vm.ParamFilterCommitTyped();
+                    else
+                        vm.ParamFilterCommitHighlight();
+
+                    if (vm.ParamFilterCanExecute)
+                        vm.RequestParamFilterExecute();
+                    return;
+                }
+
+                // Non-Value fields: commit highlighted dropdown row, then advance.
+                bool committed = vm.ParamFilterCommitHighlight();
+
+                // If we're on Rule and the chosen rule doesn't take a value, the field
+                // order skips Value — pressing Enter on Rule should execute immediately
+                // when all earlier fields are filled.
+                if (committed && vm.ParamFilterFocus == ParamFilterField.Scope
+                    && vm.ParamFilterCanExecute)
+                {
+                    // ParamFilterMoveFocus wrapped from the last field (Rule) back to Scope —
+                    // that means the rule is value-less and we're ready to execute.
+                    vm.RequestParamFilterExecute();
+                }
+                return;
+
+            case Key.Back:
+                // Backspace on empty text in PF: step back one field. Otherwise let
+                // it delete characters normally.
+                if (string.IsNullOrEmpty(vm.SearchText))
+                {
+                    e.Handled = true;
+                    vm.ParamFilterMoveFocus(-1);
+                }
+                return;
+        }
+
+        // All other keys (typing): let them through — SearchText binding will refresh
+        // the dropdown via RefreshResults → RefreshParameterFilterDisplay.
+    }
+
+    /// <summary>
+    /// Called when a parameter name is picked. Loads the value-suggestion list
+    /// for that parameter on the Revit thread.
+    /// </summary>
+    private void OnParamFilterParamSelected(string parameterName)
+    {
+        var scope = App.ViewModel.ParamFilterScopeValue;
+
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var uidoc = uiApp.ActiveUIDocument;
+            if (uidoc == null) return;
+            var doc = uidoc.Document;
+            var view = uidoc.ActiveView;
+
+            var values = ParameterFilterService.CollectValuesFor(doc, parameterName, scope, view);
+
+            Dispatcher.Invoke(() =>
+            {
+                App.ViewModel.SetParamFilterValueSuggestions(values);
+            });
+        });
+    }
+
+    /// <summary>
+    /// Runs the filter on the Revit thread, replaces the active selection with
+    /// the matches, shows feedback, and exits PF mode.
+    /// </summary>
+    private void OnParamFilterExecuteRequested()
+    {
+        var vm = App.ViewModel;
+        if (!vm.ParamFilterCanExecute) return;
+
+        var scope = vm.ParamFilterScopeValue;
+        var paramName = vm.ParamFilterParameterName!;
+        var rule = vm.ParamFilterRuleValue!.Value;
+        var value = vm.ParamFilterValueText;
+
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var uidoc = uiApp.ActiveUIDocument;
+            if (uidoc == null) return;
+            var doc = uidoc.Document;
+            var view = uidoc.ActiveView;
+
+            var matches = ParameterFilterService.Execute(doc, scope, view, paramName, rule, value);
+            int count = matches.Count;
+
+            uidoc.Selection.SetElementIds(matches);
+
+            Dispatcher.Invoke(() =>
+            {
+                vm.ExitParameterFilterMode();
+                UpdateModePillAccent();
+                UpdateResultGrouping();
+
+                if (count == 0)
+                    vm.ShowInlineError("No elements matched");
+                else
+                    vm.ShowInlineSuccess($"Selected {count} element{(count == 1 ? "" : "s")}");
+            });
+        });
     }
 }

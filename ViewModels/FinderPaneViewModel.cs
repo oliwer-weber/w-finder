@@ -30,6 +30,18 @@ public enum FamilyNavigationStage
 }
 
 /// <summary>
+/// The four input fields of the Parameter Filter quip; tracks which one
+/// the typeahead is currently driving.
+/// </summary>
+public enum ParamFilterField
+{
+    Scope,
+    Parameter,
+    Rule,
+    Value
+}
+
+/// <summary>
 /// ObservableCollection that supports bulk replacement with a single Reset notification.
 /// Avoids per-item UI updates when repopulating large lists.
 /// </summary>
@@ -101,7 +113,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>
     /// The display text for the mode pill chip inside the search box.
     /// </summary>
-    public string ModePillText => IsInInspectorMode
+    public string ModePillText => IsInParameterFilterMode
+        ? "PARAMS"
+        : IsInInspectorMode
         ? "INSPECT"
         : IsInSelectionFilterMode
         ? "FILTER"
@@ -119,14 +133,24 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// so the search bar is uncluttered when no scope is narrowed.
     /// </summary>
     public bool HasModePill =>
-        IsInInspectorMode
+        IsInParameterFilterMode
+        || IsInInspectorMode
         || IsInSelectionFilterMode
         || ActiveMode != ActiveMode.Browser;
 
     /// <summary>
     /// Dynamic placeholder text for the search box, based on the active mode.
     /// </summary>
-    public string PlaceholderText => IsInInspectorMode
+    public string PlaceholderText => IsInParameterFilterMode
+        ? ParamFilterFocus switch
+        {
+            ParamFilterField.Scope => "Pick scope\u2026",
+            ParamFilterField.Parameter => "Type parameter name\u2026",
+            ParamFilterField.Rule => "Pick rule\u2026",
+            ParamFilterField.Value => "Type or pick value\u2026",
+            _ => "Parameter filter\u2026"
+        }
+        : IsInInspectorMode
         ? "Filter parameters\u2026"
         : ActiveMode switch
         {
@@ -139,7 +163,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>
     /// Returns all possible pill text strings (for measuring uniform pill width at startup).
     /// </summary>
-    public static string[] AllPillTexts => new[] { "BROWSER", "FAMILY", "PALETTE", "QUIPS", "FILTER", "INSPECT" };
+    public static string[] AllPillTexts => new[] { "BROWSER", "FAMILY", "PALETTE", "QUIPS", "FILTER", "INSPECT", "PARAMS" };
 
     /// <summary>
     /// Called by the view when the user types a prefix character.
@@ -954,6 +978,310 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         return param;
     }
 
+    // ── Parameter Filter Mode (!pf) ────────────────────────────────
+
+    private bool _isInParameterFilterMode;
+    public bool IsInParameterFilterMode
+    {
+        get => _isInParameterFilterMode;
+        set
+        {
+            _isInParameterFilterMode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ModePillText));
+            OnPropertyChanged(nameof(HasModePill));
+            OnPropertyChanged(nameof(PlaceholderText));
+            OnPropertyChanged(nameof(ParamFilterFooterHint));
+        }
+    }
+
+    private ParamFilterField _paramFilterFocus = ParamFilterField.Scope;
+    public ParamFilterField ParamFilterFocus
+    {
+        get => _paramFilterFocus;
+        set
+        {
+            _paramFilterFocus = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsParamScopeFocused));
+            OnPropertyChanged(nameof(IsParamParameterFocused));
+            OnPropertyChanged(nameof(IsParamRuleFocused));
+            OnPropertyChanged(nameof(IsParamValueFocused));
+            OnPropertyChanged(nameof(PlaceholderText));
+        }
+    }
+
+    public bool IsParamScopeFocused => _paramFilterFocus == ParamFilterField.Scope;
+    public bool IsParamParameterFocused => _paramFilterFocus == ParamFilterField.Parameter;
+    public bool IsParamRuleFocused => _paramFilterFocus == ParamFilterField.Rule;
+    public bool IsParamValueFocused => _paramFilterFocus == ParamFilterField.Value;
+
+    private ParamFilterScope _paramFilterScopeValue = ParamFilterScope.EntireProject;
+    public ParamFilterScope ParamFilterScopeValue
+    {
+        get => _paramFilterScopeValue;
+        set { _paramFilterScopeValue = value; OnPropertyChanged(); OnPropertyChanged(nameof(ParamFilterScopeLabel)); }
+    }
+
+    private string? _paramFilterParameterName;
+    public string? ParamFilterParameterName
+    {
+        get => _paramFilterParameterName;
+        set { _paramFilterParameterName = value; OnPropertyChanged(); OnPropertyChanged(nameof(ParamFilterParameterLabel)); }
+    }
+
+    private ParamFilterRule? _paramFilterRuleValue;
+    public ParamFilterRule? ParamFilterRuleValue
+    {
+        get => _paramFilterRuleValue;
+        set { _paramFilterRuleValue = value; OnPropertyChanged(); OnPropertyChanged(nameof(ParamFilterRuleLabel)); OnPropertyChanged(nameof(ParamFilterValueLabel)); }
+    }
+
+    private string _paramFilterValueText = string.Empty;
+    public string ParamFilterValueText
+    {
+        get => _paramFilterValueText;
+        set { _paramFilterValueText = value; OnPropertyChanged(); OnPropertyChanged(nameof(ParamFilterValueLabel)); }
+    }
+
+    public string ParamFilterScopeLabel => _paramFilterScopeValue.Label();
+    public string ParamFilterParameterLabel =>
+        string.IsNullOrEmpty(_paramFilterParameterName) ? "(choose…)" : _paramFilterParameterName!;
+    public string ParamFilterRuleLabel =>
+        _paramFilterRuleValue.HasValue ? _paramFilterRuleValue.Value.Label() : "(choose…)";
+
+    /// <summary>
+    /// Label shown for the Value field. Greyed out when the chosen rule doesn't take a value.
+    /// </summary>
+    public string ParamFilterValueLabel
+    {
+        get
+        {
+            if (_paramFilterRuleValue.HasValue && !_paramFilterRuleValue.Value.TakesValue())
+                return "(not needed)";
+            return string.IsNullOrEmpty(_paramFilterValueText) ? "(type or pick…)" : _paramFilterValueText;
+        }
+    }
+
+    public string ParamFilterFooterHint => IsInParameterFilterMode
+        ? "Tab next · Shift+Tab back · Enter pick/execute · Esc cancel"
+        : string.Empty;
+
+    /// <summary>
+    /// True when all four fields are valid and the filter can be executed.
+    /// </summary>
+    public bool ParamFilterCanExecute =>
+        !string.IsNullOrEmpty(_paramFilterParameterName)
+        && _paramFilterRuleValue.HasValue
+        && (!_paramFilterRuleValue.Value.TakesValue() || !string.IsNullOrEmpty(_paramFilterValueText));
+
+    private List<string> _paramFilterAllParams = new();
+    private List<string> _paramFilterAllValues = new();
+
+    /// <summary>Fired after the user commits a parameter name; code-behind reloads
+    /// the Value field's suggestion list for the new parameter.</summary>
+    public event Action<string>? ParamFilterParamSelected;
+
+    /// <summary>Fired when Enter is pressed on the final field with all values valid.
+    /// Code-behind runs the query and updates the Revit selection.</summary>
+    public event Action? ParamFilterExecuteRequested;
+
+    /// <summary>
+    /// Enters Parameter Filter mode with the supplied parameter-name index.
+    /// </summary>
+    public void EnterParameterFilterMode(List<string> parameterNames)
+    {
+        _paramFilterAllParams = parameterNames;
+        _paramFilterAllValues = new();
+        _paramFilterScopeValue = ParamFilterScope.EntireProject;
+        _paramFilterParameterName = null;
+        _paramFilterRuleValue = null;
+        _paramFilterValueText = string.Empty;
+        _paramFilterFocus = ParamFilterField.Scope;
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        OnPropertyChanged(nameof(ParamFilterScopeLabel));
+        OnPropertyChanged(nameof(ParamFilterParameterLabel));
+        OnPropertyChanged(nameof(ParamFilterRuleLabel));
+        OnPropertyChanged(nameof(ParamFilterValueLabel));
+        OnPropertyChanged(nameof(ParamFilterFocus));
+        OnPropertyChanged(nameof(IsParamScopeFocused));
+        OnPropertyChanged(nameof(IsParamParameterFocused));
+        OnPropertyChanged(nameof(IsParamRuleFocused));
+        OnPropertyChanged(nameof(IsParamValueFocused));
+
+        IsInParameterFilterMode = true;
+        RefreshParameterFilterDisplay();
+    }
+
+    /// <summary>
+    /// Exits Parameter Filter mode and restores the normal Browser surface.
+    /// </summary>
+    public void ExitParameterFilterMode()
+    {
+        IsInParameterFilterMode = false;
+        _paramFilterAllParams.Clear();
+        _paramFilterAllValues.Clear();
+        _paramFilterParameterName = null;
+        _paramFilterRuleValue = null;
+        _paramFilterValueText = string.Empty;
+        _paramFilterFocus = ParamFilterField.Scope;
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        _debounceTimer.Stop();
+        RefreshResults();
+    }
+
+    /// <summary>
+    /// Replaces the Value field's suggestion list (called after a parameter is picked).
+    /// </summary>
+    public void SetParamFilterValueSuggestions(List<string> values)
+    {
+        _paramFilterAllValues = values;
+        if (IsInParameterFilterMode && _paramFilterFocus == ParamFilterField.Value)
+            RefreshParameterFilterDisplay();
+    }
+
+    /// <summary>
+    /// Tab / Shift+Tab. Skips the Value field when the rule doesn't take a value.
+    /// </summary>
+    public void ParamFilterMoveFocus(int direction)
+    {
+        var order = new List<ParamFilterField> { ParamFilterField.Scope, ParamFilterField.Parameter, ParamFilterField.Rule };
+        if (!_paramFilterRuleValue.HasValue || _paramFilterRuleValue.Value.TakesValue())
+            order.Add(ParamFilterField.Value);
+
+        int idx = order.IndexOf(_paramFilterFocus);
+        if (idx < 0) idx = 0;
+        int next = idx + direction;
+        if (next < 0) next = order.Count - 1;
+        if (next >= order.Count) next = 0;
+
+        ParamFilterFocus = order[next];
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        RefreshParameterFilterDisplay();
+    }
+
+    /// <summary>
+    /// Commits the dropdown's currently-highlighted row to the focused field
+    /// and advances. Returns true if a commit happened.
+    /// </summary>
+    public bool ParamFilterCommitHighlight()
+    {
+        if (HighlightedItem == null) return false;
+        var label = HighlightedItem.Name;
+        return CommitToFocusedField(label);
+    }
+
+    /// <summary>
+    /// Commits the search-box text to the focused field (used for free-text Value).
+    /// </summary>
+    public bool ParamFilterCommitTyped()
+    {
+        var typed = _searchText.Trim();
+        if (string.IsNullOrEmpty(typed)) return false;
+        return CommitToFocusedField(typed);
+    }
+
+    private bool CommitToFocusedField(string label)
+    {
+        switch (_paramFilterFocus)
+        {
+            case ParamFilterField.Scope:
+                var scope = ParamFilterScopeExt.FromLabel(label);
+                if (!scope.HasValue) return false;
+                ParamFilterScopeValue = scope.Value;
+                AdvanceFocusAfterCommit();
+                return true;
+
+            case ParamFilterField.Parameter:
+                ParamFilterParameterName = label;
+                ParamFilterParamSelected?.Invoke(label);
+                AdvanceFocusAfterCommit();
+                return true;
+
+            case ParamFilterField.Rule:
+                var rule = ParamFilterRuleExt.FromLabel(label);
+                if (!rule.HasValue) return false;
+                ParamFilterRuleValue = rule.Value;
+                AdvanceFocusAfterCommit();
+                return true;
+
+            case ParamFilterField.Value:
+                ParamFilterValueText = label;
+                // No further field; the caller (code-behind) will request execute.
+                return true;
+        }
+        return false;
+    }
+
+    private void AdvanceFocusAfterCommit()
+    {
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        ParamFilterMoveFocus(1);
+    }
+
+    /// <summary>
+    /// Builds the dropdown items for the currently focused field, filtered by SearchText.
+    /// </summary>
+    private void RefreshParameterFilterDisplay()
+    {
+        IEnumerable<string> source = _paramFilterFocus switch
+        {
+            ParamFilterField.Scope => new[] { "Entire Project", "Active View" },
+            ParamFilterField.Parameter => _paramFilterAllParams,
+            ParamFilterField.Rule => Enum.GetValues<ParamFilterRule>().Select(r => r.Label()),
+            ParamFilterField.Value => _paramFilterAllValues,
+            _ => Array.Empty<string>()
+        };
+
+        long nextId = -5000;
+        var items = source.Select(label => new BrowserItem
+        {
+            Name = label,
+            Category = string.Empty,
+            ElementId = nextId--,
+            Kind = BrowserItemKind.Shebang, // hides star and routes through generic styling
+            GroupKey = string.Empty
+        }).ToList();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+            items = FuzzyMatcher.Match(items, _searchText.TrimStart());
+
+        Results.ReplaceAll(items);
+        HighlightedItem = Results.Count > 0 ? Results[0] : null;
+
+        StatusText = _paramFilterFocus switch
+        {
+            ParamFilterField.Scope => "Choose scope for the filter",
+            ParamFilterField.Parameter => $"{_paramFilterAllParams.Count} parameters in scope",
+            ParamFilterField.Rule => "Choose how the value should match",
+            ParamFilterField.Value => _paramFilterAllValues.Count > 0
+                ? $"{_paramFilterAllValues.Count} known values — type your own or pick one"
+                : "Type a value",
+            _ => string.Empty
+        };
+    }
+
+    /// <summary>
+    /// Called by the view to push the latest search-box text into the Value field
+    /// as the user types (so ParamFilterCanExecute / labels stay current).
+    /// </summary>
+    public void ParamFilterSyncValueFromSearch()
+    {
+        if (_paramFilterFocus != ParamFilterField.Value) return;
+        ParamFilterValueText = _searchText.Trim();
+    }
+
+    /// <summary>
+    /// Requests execution of the filter. Code-behind subscribes via ParamFilterExecuteRequested.
+    /// </summary>
+    public void RequestParamFilterExecute() => ParamFilterExecuteRequested?.Invoke();
+
     // ── Family input parsing ────────────────────────────────────────
 
     /// <summary>
@@ -1202,6 +1530,14 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     {
         _cachedUnifiedList = null;
 
+        // In parameter filter mode, route to the form-driven dropdown
+        if (IsInParameterFilterMode)
+        {
+            ParamFilterSyncValueFromSearch();
+            RefreshParameterFilterDisplay();
+            return;
+        }
+
         // In selection filter mode, route to filter display instead
         if (IsInSelectionFilterMode)
         {
@@ -1410,21 +1746,24 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             }
         }
 
-        var matchedOther = FuzzyMatcher.Match(otherProjectItems, query);
-        var matchedFamilyTypes = FuzzyMatcher.Match(familyTypes, query);
-        var matchedCommands = FuzzyMatcher.Match(_commandItems, query);
-        var matchedShebangs = FuzzyMatcher.Match(_shebangItems, query);
+        var scoredOther = FuzzyMatcher.MatchScored(otherProjectItems, query);
+        var scoredFamilyTypes = FuzzyMatcher.MatchScored(familyTypes, query);
+        var scoredCommands = FuzzyMatcher.MatchScored(_commandItems, query);
+        var scoredShebangs = FuzzyMatcher.MatchScored(_shebangItems, query);
 
-        int totalMatched = matchedOther.Count + matchedFamilyTypes.Count
-            + matchedCommands.Count + matchedShebangs.Count;
+        int totalMatched = scoredOther.Count + scoredFamilyTypes.Count
+            + scoredCommands.Count + scoredShebangs.Count;
 
-        // Collapse family-type matches into one rollup row per family.
-        var familyRollups = matchedFamilyTypes
-            .GroupBy(i => new { i.FamilyName, i.Category })
+        // Collapse family-type matches into one rollup row per family. The rollup
+        // carries the *best* score across the family's types so a single strong
+        // type match floats the whole family up.
+        var familyRollups = scoredFamilyTypes
+            .GroupBy(s => new { s.Item.FamilyName, s.Item.Category })
             .Select(g =>
             {
-                var first = g.First();
-                return new BrowserItem
+                var first = g.First().Item;
+                int bestScore = g.Max(s => s.Score);
+                var rollup = new BrowserItem
                 {
                     Name = g.Key.FamilyName ?? first.Name,
                     Category = g.Key.Category ?? "Family",
@@ -1433,23 +1772,34 @@ public class FinderPaneViewModel : INotifyPropertyChanged
                     FamilyName = g.Key.FamilyName,
                     TypeCount = g.Count()
                 };
+                return (Item: rollup, Score: bestScore);
             })
             .ToList();
 
-        var combined = new List<BrowserItem>(
-            matchedOther.Count + familyRollups.Count + matchedCommands.Count + matchedShebangs.Count);
-        combined.AddRange(matchedOther);
+        var combined = new List<(BrowserItem Item, int Score)>(
+            scoredOther.Count + familyRollups.Count + scoredCommands.Count + scoredShebangs.Count);
+        combined.AddRange(scoredOther);
         combined.AddRange(familyRollups);
-        combined.AddRange(matchedCommands);
-        combined.AddRange(matchedShebangs);
+        combined.AddRange(scoredCommands);
+        combined.AddRange(scoredShebangs);
 
-        foreach (var i in combined)
-            i.GroupKey = GetGroupKey(i);
+        foreach (var entry in combined)
+            entry.Item.GroupKey = GetGroupKey(entry.Item);
+
+        // Rank groups by their best-scoring member so a strong match in any Kind
+        // lifts its whole group above weakly-matched groups. Kind precedence
+        // (GetBrowserGroupOrder) is kept only as a tiebreaker.
+        var groupBestScore = combined
+            .GroupBy(e => e.Item.GroupKey)
+            .ToDictionary(g => g.Key, g => g.Max(e => e.Score));
 
         var grouped = combined
-            .OrderBy(GetBrowserGroupOrder)
-            .ThenBy(i => i.GroupKey, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(e => groupBestScore[e.Item.GroupKey])
+            .ThenBy(e => GetBrowserGroupOrder(e.Item))
+            .ThenBy(e => e.Item.GroupKey, StringComparer.OrdinalIgnoreCase)
+            .ThenByDescending(e => e.Score)
             .Take(MaxResults)
+            .Select(e => e.Item)
             .ToList();
 
         Results.ReplaceAll(grouped);
