@@ -57,8 +57,21 @@ public class ReportPage
     /// <summary>Shown in the status line, e.g. "CAD · Imported DWGs".</summary>
     public string Breadcrumb { get; set; } = "";
 
-    /// <summary>Footer hint for this page. Falls back to a generic hint when empty.</summary>
-    public string Hint { get; set; } = "";
+    /// <summary>
+    /// ActionKey of the row that Ctrl+Enter runs on this page ("apply",
+    /// "delete selected"...). Null when the page has nothing to finish.
+    /// </summary>
+    public string? PrimaryActionKey { get; set; }
+
+    /// <summary>
+    /// Row the cursor starts on when the page first opens. Null means the
+    /// first row. Lets a page keep its action rows on top without making the
+    /// user arrow past them every time.
+    /// </summary>
+    public ReportRow? InitialCursorRow { get; set; }
+
+    /// <summary>Short verb for the footer hint, e.g. "apply" or "delete".</summary>
+    public string PrimaryActionLabel { get; set; } = "run";
 
     /// <summary>Text for the synthetic back row. Null on the root page.</summary>
     public string? BackLabel { get; set; }

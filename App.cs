@@ -104,7 +104,8 @@ public class App : IExternalApplication
             assemblyName: assemblyPath,
             className: "w_finder.FinderCommand");
 
-        bool isDark = IsRevitDarkTheme();
+        // VersionNumber is the release year as text, e.g. "2027".
+        bool isDark = IsRevitDarkTheme(application.ControlledApplication.VersionNumber);
 
         var button = panel.AddItem(buttonData) as PushButton;
         if (button != null)
@@ -272,13 +273,15 @@ public class App : IExternalApplication
     /// Checks whether Revit is currently using a dark theme.
     /// Reads "Theme=0" (dark) or "Theme=1" (light) from Revit.ini under [Colors].
     /// </summary>
-    private static bool IsRevitDarkTheme()
+    private static bool IsRevitDarkTheme(string revitVersion)
     {
         try
         {
+            // Each Revit release keeps its own Revit.ini, so read the one for
+            // the version we are actually running in.
             string iniPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Autodesk", "Revit", "Autodesk Revit 2025", "Revit.ini");
+                "Autodesk", "Revit", $"Autodesk Revit {revitVersion}", "Revit.ini");
 
             if (File.Exists(iniPath))
             {

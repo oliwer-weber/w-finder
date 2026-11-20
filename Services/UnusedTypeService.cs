@@ -252,7 +252,7 @@ public static class UnusedTypeService
             }
             catch (Exception ex)
             {
-                failed.Add($"{name} — {ex.Message}");
+                failed.Add($"{name}: {ex.Message}");
             }
         }
 

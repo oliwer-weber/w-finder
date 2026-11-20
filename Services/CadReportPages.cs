@@ -19,7 +19,6 @@ public class CadReportPages
         {
             Breadcrumb = "CAD · "
                 + $"{_report.Linked.Count} linked, {_report.Imported.Count} imported",
-            Hint = "Enter: open · Esc: close · ↑↓: navigate",
         };
 
         page.Rows.Add(new ReportRow
@@ -35,8 +34,8 @@ public class CadReportPages
         {
             Text = "Imported DWGs",
             Label = _report.Imported.Count == 0
-                ? "None — nothing to clean up"
-                : "Embedded in the model — review these",
+                ? "None, nothing to clean up"
+                : "Embedded in the model. Review these",
             Value = Plural(_report.Imported.Count, "file"),
             DrillKey = "imported",
             GroupKey = "CAD IN THIS PROJECT",
@@ -86,9 +85,8 @@ public class CadReportPages
     {
         var page = new ReportPage
         {
-            Breadcrumb = $"CAD · {title} — {Plural(entries.Count, "file")}",
+            Breadcrumb = $"CAD · {title} · {Plural(entries.Count, "file")}",
             BackLabel = "CAD overview",
-            Hint = "Enter: details · Esc: back · Type: filter",
         };
 
         if (entries.Count == 0)
@@ -124,7 +122,6 @@ public class CadReportPages
         {
             Breadcrumb = $"CAD · {e.Name}",
             BackLabel = e.IsLinked ? "Linked DWGs" : "Imported DWGs",
-            Hint = "Enter on “Select in model” · Esc: back",
         };
 
         var group = e.Name.ToUpperInvariant();
@@ -158,9 +155,8 @@ public class CadReportPages
     {
         var page = new ReportPage
         {
-            Breadcrumb = $"CAD · Unplaced types — {Plural(_report.UnplacedTypes.Count, "type")}",
+            Breadcrumb = $"CAD · Unplaced types · {Plural(_report.UnplacedTypes.Count, "type")}",
             BackLabel = "CAD overview",
-            Hint = "Esc: back · Type: filter",
         };
 
         foreach (var (name, id) in _report.UnplacedTypes)

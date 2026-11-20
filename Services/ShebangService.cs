@@ -56,49 +56,35 @@ public static class ShebangService
     }
 
     /// <summary>
-    /// Executes a shebang by its ID. Must be called on the Revit API thread.
+    /// Runs a one-shot quip (one that does its job and is done, with no screen
+    /// of its own in the pane). Must be called on the Revit API thread.
+    ///
+    /// Returns whether it worked plus a short message. The caller closes the
+    /// pane on success and keeps it open, showing the message, on failure.
+    /// Interactive quips (sf, pi, pf, dwg, lp, ut, us) are launched by the
+    /// view instead and never reach this method.
     /// </summary>
-    public static void Execute(string shebangId, UIApplication uiApp)
+    public static (bool Ok, string Message) Execute(string shebangId, UIApplication uiApp)
     {
-        switch (shebangId)
+        return shebangId switch
         {
-            case "pu":
-                ToggleProjectUnits(uiApp);
-                break;
-            case "pin":
-                PinAllLevelsGridsLinks(uiApp);
-                break;
-            case "sf":
-                // Interactive filter — handled by code-behind, not here.
-                break;
-            case "pi":
-                // Interactive inspector — handled by code-behind, not here.
-                break;
-            case "pf":
-                // Interactive parameter filter — handled by code-behind, not here.
-                break;
-            case "gv":
-                ToggleGroupVisibility(uiApp);
-                break;
-            case "dwg":
-            case "lp":
-            case "ut":
-            case "us":
-                // All render inside the pane (LaunchCadReport,
-                // LaunchLinePatternCleanup, LaunchUnusedTypes in the
-                // code-behind), so there is nothing to do on the Revit thread here.
-                break;
-        }
+            "pu" => ToggleProjectUnits(uiApp),
+            "pin" => PinAllLevelsGridsLinks(uiApp),
+            "gv" => ToggleGroupVisibility(uiApp),
+            _ => (false, $"Unknown quip \"{shebangId}\""),
+        };
     }
+
+    private static readonly (bool, string) NoDocument = (false, "Open a project first");
 
     /// <summary>
     /// Toggles project units between imperial (feet/fractional inches) and SI (mm/m²/m³).
     /// Detects the current system by majority vote, then switches to the opposite.
     /// </summary>
-    private static void ToggleProjectUnits(UIApplication uiApp)
+    private static (bool Ok, string Message) ToggleProjectUnits(UIApplication uiApp)
     {
         var doc = uiApp.ActiveUIDocument?.Document;
-        if (doc == null) return;
+        if (doc == null) return NoDocument;
 
         var units = doc.GetUnits();
 
@@ -151,15 +137,17 @@ public static class ShebangService
             doc.SetUnits(units);
             tx.Commit();
         }
+
+        return (true, switchToMetric ? "Units set to metric" : "Units set to imperial");
     }
 
     /// <summary>
     /// Pins all Levels, Grids, and RevitLinkInstances in the project.
     /// </summary>
-    private static void PinAllLevelsGridsLinks(UIApplication uiApp)
+    private static (bool Ok, string Message) PinAllLevelsGridsLinks(UIApplication uiApp)
     {
         var doc = uiApp.ActiveUIDocument?.Document;
-        if (doc == null) return;
+        if (doc == null) return NoDocument;
 
         var levels = new FilteredElementCollector(doc)
             .OfClass(typeof(Level))
@@ -190,6 +178,8 @@ public static class ShebangService
 
             tx.Commit();
         }
+
+        return (true, $"Pinned {pinned} element{(pinned == 1 ? "" : "s")}");
     }
 
     /// <summary>
@@ -198,14 +188,15 @@ public static class ShebangService
     /// Second run: clears the view's Temporary Hide/Isolate mode (same as the
     /// "Reset Temporary Hide/Isolate" button on the view control bar).
     /// </summary>
-    private static void ToggleGroupVisibility(UIApplication uiApp)
+    private static (bool Ok, string Message) ToggleGroupVisibility(UIApplication uiApp)
     {
         var doc = uiApp.ActiveUIDocument?.Document;
         var view = doc?.ActiveView;
-        if (doc == null || view == null) return;
+        if (doc == null || view == null) return NoDocument;
 
         // Views that don't support temporary hide (sheets, schedules, browsers).
-        if (!view.CanUseTemporaryVisibilityModes()) return;
+        if (!view.CanUseTemporaryVisibilityModes())
+            return (false, "This view can't temporarily hide elements");
 
         // If any temporary hide/isolate is already on, just clear it — this is the
         // "toggle off" half, and it matches what the manual reset button does.
@@ -215,7 +206,7 @@ public static class ShebangService
             reset.Start();
             view.DisableTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate);
             reset.Commit();
-            return;
+            return (true, "Groups shown again");
         }
 
         // Collect group instances visible in this view, plus their members.
@@ -235,7 +226,7 @@ public static class ShebangService
         }
 
         // Nothing grouped in this view — leave the view untouched.
-        if (toHide.Count == 0) return;
+        if (toHide.Count == 0) return (false, "No groups in this view");
 
         // Elements that can't be hidden (pinned-in-place category exceptions, etc.)
         // would throw, so filter down to hideable ones first.
@@ -248,11 +239,13 @@ public static class ShebangService
             .Distinct()
             .ToList();
 
-        if (hideable.Count == 0) return;
+        if (hideable.Count == 0) return (false, "The groups in this view can't be hidden");
 
         using var tx = new Transaction(doc, "Quip: Hide Groups");
         tx.Start();
         view.HideElementsTemporary(hideable);
         tx.Commit();
+
+        return (true, $"Hid {groups.Count} group{(groups.Count == 1 ? "" : "s")}");
     }
 }

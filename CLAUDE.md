@@ -33,8 +33,16 @@ w_finder/
 ├── ViewModels/
 │   └── FinderPaneViewModel.cs    # MVVM — search logic, mode detection, favorites, selection, action bar
 ├── Views/
-│   ├── FinderPaneView.xaml       # WPF UI (search box, mode badges, grouped results, favorites, action bar)
-│   ├── FinderPaneView.xaml.cs    # Code-behind — keyboard nav, Revit API actions via ExternalEvent
+│   ├── FinderPaneView.xaml       # WPF UI (search box, mode badges, grouped results, favorites, action bar, hint bar)
+│   ├── FinderPaneView.xaml.cs    # Code-behind core (partial class): setup, pill/theme, mouse, closing
+│   ├── FinderPaneView.Keyboard.cs        # THE keyboard handler, shared by every screen
+│   ├── FinderPaneView.Activation.cs      # Enter / double-click: open view, place family, run command, launch quip
+│   ├── FinderPaneView.QuickActions.cs    # Rename, delete, duplicate, export, edit family, shortcuts
+│   ├── FinderPaneView.SelectionFilter.cs # !sf (built on the report engine)
+│   ├── FinderPaneView.Inspector.cs       # !pi
+│   ├── FinderPaneView.ParamFilter.cs     # !pf
+│   ├── FinderPaneView.Reports.cs         # !dwg, !lp + shared report action plumbing
+│   ├── FinderPaneView.UnusedTypes.cs     # !ut, !us
 │   ├── EqualityConverter.cs      # IMultiValueConverter for action bar highlight
 │   ├── LightTheme.xaml           # Light mode resources
 │   └── DarkTheme.xaml            # Dark mode resources
@@ -68,9 +76,36 @@ All modes are detected by a single-character prefix in the search box. Mode dete
 - **`-e`** — edit mode: opens family for editing instead of placing. Purple "EDIT" badge.
 
 ### Shebang Mode (`!` prefix)
-- Custom plugin commands registered in `ShebangService.Shebangs` array.
-- Currently one shebang: `!pu` — Toggle Project Units between imperial (feet/fractional inches, 1/16" accuracy) and SI (mm, m², m³).
+- Custom plugin commands ("quips") registered in `ShebangService.Shebangs` array.
+- **One-shot quips** (`pu`, `pin`, `gv`) run in `ShebangService.Execute`, which returns `(Ok, Message)`. Success closes the pane; failure keeps it open and shows the message.
+- **Interactive quips** take over the pane (`PaneSurface`) and are launched from `FinderPaneView.Activation.cs > LaunchQuip`:
+  - `sf` Selection Filter, `dwg`, `lp`, `ut`, `us`: pages of rows on the shared **report engine** (`ReportPage` / `ReportRow`).
+  - `pi` Property Inspector and `pf` Parameter Filter: their own surfaces.
 - Shebangs use negative ElementIds to avoid collisions with Revit elements.
+
+## Keyboard grammar (identical on every screen)
+
+Handled in ONE place: `FinderPaneView.Keyboard.cs`. Do not add per-quip key handlers; add a case to the shared handler's helper for the surface instead.
+
+| Key | Meaning |
+|-----|---------|
+| Up / Down | Move the cursor |
+| Enter (or double-click) | The row's main action: open, run, drill in, edit, pick |
+| Ctrl+Enter | Finish a multi-step quip: apply filter, delete ticked, run (`ReportPage.PrimaryActionKey`) |
+| Right | Drill in. Never executes anything |
+| Left | Back one level (only when the caret is at the start of the box) |
+| Backspace on empty box | Back one level; at the top of a prefix mode it removes the mode |
+| Space | Tick, on rows with a tick box. Types a space everywhere else |
+| Tab | Search: action bar (cycles pills when open). `pf`: next field |
+| Ctrl+A / Ctrl+D | Tick all / none on report pages with tick boxes |
+| Esc | Step back ONE layer: edit/rename box, action bar, drill level, quip. Closes the pane when nothing is left (`FinderPaneViewModel.StepBack`) |
+
+## Closing rule
+
+- `FinderCommand.ClosePane(uiApp)` is the only way the pane closes (resets all transient state, saves last state, hides). Never call `pane.Hide()` directly.
+- Anything that hands control back to Revit closes on success: open view, place family, run command, one-shot quip, `sf` apply, `pf` run, select-in-model, edit family.
+- Repeatable housekeeping stays open with a toast: rename, delete, duplicate, export, inspector edits, report pages.
+- Failures always keep the pane open (or reopen it via `ReopenWithError`) with the error visible.
 
 ## Quick Actions
 - **Tab** on a highlighted browser item opens the action bar (pill row at bottom of pane).
@@ -79,14 +114,17 @@ All modes are detected by a single-character prefix in the search box. Mode dete
   - Sheets: Rename, Delete, Duplicate, Dup+Detail
   - Schedules: Rename, Delete, Duplicate
   - Families/Groups/Links: Rename, Delete
-  - Commands/Shebangs: no actions
-- Left/Right to navigate pills, Enter to execute, Escape to close action bar.
+  - Commands: Set Shortcut (S), Remove Shortcut (R). Shebangs: no actions
+- Left/Right or Tab to navigate pills, Enter or click to execute, Escape to close the action bar. Pill hotkeys are matched against each pill's `Shortcut` text.
 
 ## Technical Patterns
-- **Thread safety:** All Revit API calls go through `RevitBackgroundTask.Raise(Action<UIApplication>)` — singleton ExternalEvent that queues one action at a time.
-- **MVVM:** ViewModel has no Revit API references. Code-behind subscribes to ViewModel events (`ItemSelectionRequested`, `ItemOpenRequested`, `QuickActionRequested`) and bridges to Revit via ExternalEvent.
+- **Thread safety:** All Revit API calls go through `RevitBackgroundTask.Raise(Action<UIApplication>)`, a singleton ExternalEvent with a queue. Each action is wrapped in try/catch: failures are logged (`QuipLog`) and shown as a toast.
+- **MVVM:** ViewModel has no Revit API references. Code-behind subscribes to ViewModel events (`ItemSelectionRequested`, `QuickActionRequested`, `ReportActionRequested`...) and bridges to Revit via ExternalEvent.
+- **PaneSurface:** `FinderPaneViewModel.Surface` (`Search`, `Inspector`, `ParamFilter`, `Report`) says which screen owns the pane. Exactly one at a time; `ExitSurface()` leaves a quip, `ResetTransientState()` returns everything to a plain search (run on close and on open).
+- **Report engine:** footer hints are generated from what a page can do (`ReportFooterHint`), so pages never hand-write key hints.
 - **BrowserItemKind enum:** Tags every collected item so modes can filter by kind.
-- **Keyboard nav:** Up/Down to navigate, Enter to open/execute, Tab to open action bar, Escape to close action bar or hide pane, Ctrl+F to toggle favorite.
+- **Family placement:** `PostRequestForElementTypePlacement` (non-blocking), with `PromptForFamilyInstancePlacement` as fallback.
+- **Copy:** no em-dashes in UI text.
 
 ## Build & Test
 ```powershell

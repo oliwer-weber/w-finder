@@ -29,19 +29,15 @@ public class FinderCommand : IExternalCommand
 
         if (pane.IsShown())
         {
-            // Save current state before hiding (for "remember" launch behaviors)
-            SettingsService.SaveLastState((int)App.ViewModel.ActiveMode, App.ViewModel.SearchText);
-            // Reset transient input state so it doesn't reappear on next open.
-            App.ViewModel.CloseInlineRename();
-            App.ViewModel.CloseActionBar();
-            pane.Hide();
+            ClosePane(uiApp);
         }
         else
         {
-            // Defensive: if the pane was hidden by some other path (e.g. floating-pane
-            // close-X) while inline rename / action bar was open, clear it before showing.
-            App.ViewModel.CloseInlineRename();
-            App.ViewModel.CloseActionBar();
+            // Defensive: if the pane was hidden by some other path (e.g. the
+            // floating pane's close-X) while a quip, rename box or action bar
+            // was open, clear all of that so it opens on a clean search.
+            // refresh: false because the items are reloaded just below.
+            App.ViewModel.ResetTransientState(refresh: false);
 
             // Refresh browser items before showing the pane
             var doc = uiApp.ActiveUIDocument?.Document;
@@ -86,5 +82,26 @@ public class FinderCommand : IExternalCommand
 
             pane.Show();
         }
+    }
+
+    /// <summary>
+    /// The one and only way the pane closes. Every "we're done, hand control
+    /// back to Revit" path calls this, so they all behave the same:
+    /// remember the mode/search for next time, drop any open quip, rename box
+    /// or action bar, then hide. Must run on the Revit API thread.
+    /// </summary>
+    public static void ClosePane(UIApplication uiApp)
+    {
+        var vm = App.ViewModel;
+
+        // Reset first, then remember. Inside a quip or a family drill-down the
+        // search box holds that screen's filter text, which means nothing next
+        // time; after the reset it holds the real search (or nothing).
+        vm.ResetTransientState();
+        SettingsService.SaveLastState((int)vm.ActiveMode, vm.SearchText);
+
+        var pane = uiApp.GetDockablePane(App.PaneId);
+        if (pane.IsShown())
+            pane.Hide();
     }
 }

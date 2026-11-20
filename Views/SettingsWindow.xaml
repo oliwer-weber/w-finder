@@ -186,7 +186,7 @@
                             </ComboBox>
                         </StackPanel>
 
-                        <TextBlock Text="Clean slate resets each time. Use 'default mode' to always start in a specific mode — you can backspace to get back to Browser."
+                        <TextBlock Text="Clean slate resets each time. Use 'default mode' to always start in a specific mode. You can backspace to get back to Browser."
                                    FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"
                                    Foreground="{DynamicResource InactiveText}"
                                    Opacity="0.7"/>

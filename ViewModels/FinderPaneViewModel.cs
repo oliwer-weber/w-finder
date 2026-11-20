@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -18,6 +18,20 @@ public enum ActiveMode
     Place,
     Command,
     Shebang
+}
+
+/// <summary>
+/// What the pane is currently showing. "Search" is the normal list (in any
+/// of the ActiveMode prefixes); the others are quips that take over the pane.
+/// Exactly one is active at a time, which is what makes Escape, close and
+/// reset behave the same everywhere.
+/// </summary>
+public enum PaneSurface
+{
+    Search,
+    Inspector,
+    ParamFilter,
+    Report
 }
 
 /// <summary>
@@ -71,7 +85,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     private HashSet<long> _favoriteIds = new();
     private readonly DispatcherTimer _debounceTimer;
     private (string query, string? categoryFilter)? _cachedFamilyInput;
-    private List<BrowserItem>? _cachedUnifiedList;
 
     public FinderPaneViewModel()
     {
@@ -119,8 +132,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         ? "PARAMS"
         : IsInInspectorMode
         ? "INSPECT"
-        : IsInSelectionFilterMode
-        ? "FILTER"
         : ActiveMode switch
         {
             ActiveMode.Place => "FAMILY",
@@ -135,11 +146,206 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// so the search bar is uncluttered when no scope is narrowed.
     /// </summary>
     public bool HasModePill =>
-        IsInReportMode
-        || IsInParameterFilterMode
-        || IsInInspectorMode
-        || IsInSelectionFilterMode
+        Surface != PaneSurface.Search
         || ActiveMode != ActiveMode.Browser;
+
+    // ── Surface (which screen owns the pane) ────────────────────────
+
+    private PaneSurface _surface = PaneSurface.Search;
+    public PaneSurface Surface
+    {
+        get => _surface;
+        private set
+        {
+            if (_surface == value) return;
+            _surface = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsInReportMode));
+            OnPropertyChanged(nameof(IsInInspectorMode));
+            OnPropertyChanged(nameof(IsInParameterFilterMode));
+            OnPropertyChanged(nameof(ModePillText));
+            OnPropertyChanged(nameof(HasModePill));
+            OnPropertyChanged(nameof(PlaceholderText));
+            OnPropertyChanged(nameof(ShowFavorites));
+            OnPropertyChanged(nameof(IsEmptyState));
+            NotifyFooterHint();
+        }
+    }
+
+    public bool IsInReportMode => Surface == PaneSurface.Report;
+    public bool IsInInspectorMode => Surface == PaneSurface.Inspector;
+    public bool IsInParameterFilterMode => Surface == PaneSurface.ParamFilter;
+
+    /// <summary>
+    /// The single hint line at the bottom of the pane while a quip is open.
+    /// Empty on the search surface (the action bar lives there instead).
+    /// </summary>
+    public string FooterHint => Surface switch
+    {
+        PaneSurface.Report => ReportFooterHint,
+        PaneSurface.Inspector => InspectorFooterHint,
+        PaneSurface.ParamFilter => ParamFilterFooterHint,
+        _ => string.Empty
+    };
+
+    public bool HasFooterHint => Surface != PaneSurface.Search;
+
+    private void NotifyFooterHint()
+    {
+        OnPropertyChanged(nameof(FooterHint));
+        OnPropertyChanged(nameof(HasFooterHint));
+    }
+
+    /// <summary>
+    /// Leaves whatever quip is open and returns to the search list.
+    /// </summary>
+    public void ExitSurface()
+    {
+        if (Surface == PaneSurface.Search) return;
+
+        ClearSurfaceState();
+        Surface = PaneSurface.Search;
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        _debounceTimer.Stop();
+        RefreshResults();
+    }
+
+    /// <summary>Drops the data of every quip. Does not change <see cref="Surface"/>.</summary>
+    private void ClearSurfaceState()
+    {
+        // Report
+        _reportStack.Clear();
+        _reportPage = null;
+        _reportDrillProvider = null;
+        _reportRowMap.Clear();
+
+        // Inspector
+        IsInspectorEditMode = false;
+        EditingInspectorParam = null;
+        _inspectorParams = new();
+        _inspectorParamMap.Clear();
+        _inspectorNavStack.Clear();
+        InspectorElementIds = new();
+        InspectorIsMixedCategory = false;
+        InspectorDrilledCategory = null;
+        InspectorBreadcrumb = "INSPECT";
+
+        // Parameter filter
+        _paramFilterAllParams = new();
+        _paramFilterAllValues = new();
+        _paramFilterParameterName = null;
+        _paramFilterRuleValue = null;
+        _paramFilterValueText = string.Empty;
+        _paramFilterFocus = ParamFilterField.Scope;
+    }
+
+    /// <summary>
+    /// Escape. Undoes exactly one layer: an open edit/rename box, the action
+    /// bar, one drill level, then the quip itself. Returns false when there is
+    /// nothing left to step out of, which tells the view to close the pane.
+    /// </summary>
+    public bool StepBack()
+    {
+        if (IsInspectorEditMode) { CancelInspectorEdit(); return true; }
+        if (IsInlineRenameVisible) { CloseInlineRename(); return true; }
+        if (IsActionBarVisible) { CloseActionBar(); return true; }
+        if (IsChipNavigationActive) { ExitChipNavigation(); return true; }
+
+        switch (Surface)
+        {
+            case PaneSurface.Report:
+                if (!ReportGoBack()) ExitSurface();
+                return true;
+
+            case PaneSurface.Inspector:
+                if (InspectorDrilledCategory != null) InspectorGoBack();
+                else ExitSurface();
+                return true;
+
+            case PaneSurface.ParamFilter:
+                // The four fields are one form, not four layers.
+                ExitSurface();
+                return true;
+        }
+
+        if (FamilyNavigationStage == FamilyNavigationStage.TypeLevel)
+        {
+            NavigateBackToFamilies();
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Left arrow / Backspace on an empty box: go up one drill level.
+    /// Unlike <see cref="StepBack"/> this never leaves a quip or closes the
+    /// pane. Returns false at the top level.
+    /// </summary>
+    public bool GoBackLevel()
+    {
+        switch (Surface)
+        {
+            case PaneSurface.Report:
+                return ReportGoBack();
+
+            case PaneSurface.Inspector:
+                if (InspectorDrilledCategory == null) return false;
+                InspectorGoBack();
+                return true;
+
+            case PaneSurface.ParamFilter:
+                if (ParamFilterFocus == ParamFilterField.Scope) return false;
+                ParamFilterMoveFocus(-1);
+                return true;
+        }
+
+        if (FamilyNavigationStage == FamilyNavigationStage.TypeLevel)
+        {
+            NavigateBackToFamilies();
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Puts the pane back on a plain search list: no quip, no rename box, no
+    /// action bar, no family drill-down. Called whenever the pane closes and
+    /// again when it opens, so it can never reopen stuck inside something.
+    /// </summary>
+    /// <param name="refresh">
+    /// Pass false when the caller is about to reload and refresh the list
+    /// itself (opening the pane), to avoid searching everything twice.
+    /// </param>
+    public void ResetTransientState(bool refresh = true)
+    {
+        CloseInlineRename();
+        CloseActionBar();
+        ExitChipNavigation();
+
+        if (Surface != PaneSurface.Search)
+        {
+            ClearSurfaceState();
+            Surface = PaneSurface.Search;
+            _searchText = string.Empty;
+            OnPropertyChanged(nameof(SearchText));
+        }
+
+        if (FamilyNavigationStage != FamilyNavigationStage.FamilyLevel)
+        {
+            SelectedFamilyForDrilldown = null;
+            FamilyNavigationStage = FamilyNavigationStage.FamilyLevel;
+            _searchText = _searchBeforeDrill;
+            _cachedFamilyInput = null;
+            OnPropertyChanged(nameof(SearchText));
+        }
+
+        _debounceTimer.Stop();
+        if (refresh) RefreshResults();
+    }
 
     /// <summary>
     /// Dynamic placeholder text for the search box, based on the active mode.
@@ -157,6 +363,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         }
         : IsInInspectorMode
         ? "Filter parameters\u2026"
+        : FamilyNavigationStage == FamilyNavigationStage.TypeLevel
+        ? "Filter types\u2026"
         : ActiveMode switch
         {
             ActiveMode.Place => "Search families to place or edit\u2026",
@@ -168,7 +376,10 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>
     /// Returns all possible pill text strings (for measuring uniform pill width at startup).
     /// </summary>
-    public static string[] AllPillTexts => new[] { "BROWSER", "FAMILY", "PALETTE", "QUIPS", "FILTER", "INSPECT", "PARAMS" };
+    public static string[] AllPillTexts => new[]
+    {
+        "BROWSER", "FAMILY", "PALETTE", "QUIPS", "FILTER", "INSPECT", "PARAMS", "CAD", "PATTERNS", "TYPES"
+    };
 
     /// <summary>
     /// Called by the view when the user types a prefix character.
@@ -213,6 +424,10 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             _searchText = value;
             _cachedFamilyInput = null;
             ExitChipNavigation();
+
+            // The action bar belongs to the row that was highlighted; once the
+            // list is about to change under it, it would act on a stale row.
+            if (IsActionBarVisible) CloseActionBar();
 
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsEmptyState));
@@ -266,11 +481,13 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// When true, Family Mode only shows types that have placed instances in the project.
     /// </summary>
     public bool FilterPlacedTypes { get; set; }
-    public bool ShowFavorites => HasFavorites && IsBrowserMode;
+    public bool ShowFavorites => HasFavorites && IsBrowserMode && Surface == PaneSurface.Search;
 
     // ── Empty state ─────────────────────────────────────────────────
 
-    public bool IsEmptyState => string.IsNullOrWhiteSpace(_searchText) && FamilyNavigationStage == FamilyNavigationStage.FamilyLevel;
+    public bool IsEmptyState => Surface == PaneSurface.Search
+        && string.IsNullOrWhiteSpace(_searchText)
+        && FamilyNavigationStage == FamilyNavigationStage.FamilyLevel;
 
     /// <summary>
     /// Available categories for Place mode empty state chips.
@@ -343,8 +560,12 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             _familyNavigationStage = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsEmptyState));
+            OnPropertyChanged(nameof(PlaceholderText));
         }
     }
+
+    /// <summary>What was typed before drilling into a family, restored on the way back.</summary>
+    private string _searchBeforeDrill = string.Empty;
 
     private string? _selectedFamilyForDrilldown;
     public string? SelectedFamilyForDrilldown
@@ -359,11 +580,16 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public void DrillIntoFamily(BrowserItem familyItem)
     {
         if (familyItem.FamilyName == null) return;
+        _searchBeforeDrill = _searchText;
         SelectedFamilyForDrilldown = familyItem.FamilyName;
         FamilyNavigationStage = FamilyNavigationStage.TypeLevel;
-        // Set search text to family name for context
-        _searchText = familyItem.FamilyName;
+        // Empty box: the family name is already in the header and back row,
+        // and an empty box means typing filters the types and Left /
+        // Backspace go straight back, the same as inside any quip.
+        _searchText = string.Empty;
+        _cachedFamilyInput = null;
         OnPropertyChanged(nameof(SearchText));
+        _debounceTimer.Stop();
         RefreshResults();
     }
 
@@ -374,231 +600,11 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     {
         SelectedFamilyForDrilldown = null;
         FamilyNavigationStage = FamilyNavigationStage.FamilyLevel;
-        _searchText = string.Empty;
+        // Back to the list you drilled from, not to an empty box.
+        _searchText = _searchBeforeDrill;
         _cachedFamilyInput = null;
         OnPropertyChanged(nameof(SearchText));
         RefreshResults();
-    }
-
-    // ── Selection Filter Mode ──────────────────────────────────────
-
-    private bool _isInSelectionFilterMode;
-    public bool IsInSelectionFilterMode
-    {
-        get => _isInSelectionFilterMode;
-        set
-        {
-            _isInSelectionFilterMode = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(ModePillText));
-            OnPropertyChanged(nameof(FilterFooterHint));
-            OnPropertyChanged(nameof(HasModePill));
-        }
-    }
-
-    private List<SelectionFilterNode> _filterRootNodes = new();
-    private Stack<SelectionFilterNode?> _filterNavStack = new();
-    private List<SelectionFilterNode> _filterCurrentNodes = new();
-    private Dictionary<long, SelectionFilterNode> _filterNodeMap = new();
-    private int _filterTotalCount;
-
-    private string _filterBreadcrumb = "Selection";
-    public string FilterBreadcrumb
-    {
-        get => _filterBreadcrumb;
-        set { _filterBreadcrumb = value; OnPropertyChanged(); }
-    }
-
-    public string FilterFooterHint => IsInSelectionFilterMode
-        ? "Space: toggle \u00b7 \u2192: drill in \u00b7 \u2190: back \u00b7 Enter: apply \u00b7 Esc: cancel"
-        : string.Empty;
-
-    /// <summary>
-    /// Enters selection filter mode with the given tree of category nodes.
-    /// </summary>
-    public void EnterSelectionFilterMode(List<SelectionFilterNode> rootNodes)
-    {
-        _filterRootNodes = rootNodes;
-        _filterNavStack.Clear();
-        _filterCurrentNodes = rootNodes;
-        _filterTotalCount = rootNodes.Sum(n => n.TotalCount);
-        FilterBreadcrumb = "Selection";
-
-        _searchText = string.Empty;
-        OnPropertyChanged(nameof(SearchText));
-
-        IsInSelectionFilterMode = true;
-        RefreshFilterDisplay();
-    }
-
-    /// <summary>
-    /// Exits selection filter mode and restores the normal view.
-    /// </summary>
-    public void ExitSelectionFilterMode()
-    {
-        IsInSelectionFilterMode = false;
-        _filterRootNodes.Clear();
-        _filterNavStack.Clear();
-        _filterCurrentNodes.Clear();
-        _filterNodeMap.Clear();
-        _filterTotalCount = 0;
-        FilterBreadcrumb = "Selection";
-
-        _searchText = string.Empty;
-        OnPropertyChanged(nameof(SearchText));
-        _debounceTimer.Stop();
-        RefreshResults();
-    }
-
-    /// <summary>
-    /// Drills into the highlighted node's children (e.g. Category → Families).
-    /// </summary>
-    public void FilterDrillIn()
-    {
-        if (HighlightedItem == null) return;
-        if (!_filterNodeMap.TryGetValue(HighlightedItem.ElementId, out var node)) return;
-        if (node.Children.Count == 0) return; // at instance level
-
-        // Push current parent onto nav stack (null means we were at root)
-        _filterNavStack.Push(node.Parent);
-        _filterCurrentNodes = node.Children;
-        FilterBreadcrumb += $" > {node.Name}";
-
-        _searchText = string.Empty;
-        OnPropertyChanged(nameof(SearchText));
-        RefreshFilterDisplay();
-    }
-
-    /// <summary>
-    /// Goes back one level in the filter hierarchy. No-op at root.
-    /// </summary>
-    public void FilterGoBack()
-    {
-        if (_filterNavStack.Count == 0) return; // at root — only Escape exits
-
-        var parent = _filterNavStack.Pop();
-        if (parent == null)
-        {
-            // Back to root
-            _filterCurrentNodes = _filterRootNodes;
-            FilterBreadcrumb = "Selection";
-        }
-        else
-        {
-            _filterCurrentNodes = parent.Children;
-            // Trim breadcrumb: remove last " > segment"
-            int lastArrow = FilterBreadcrumb.LastIndexOf(" > ");
-            FilterBreadcrumb = lastArrow >= 0 ? FilterBreadcrumb.Substring(0, lastArrow) : "Selection";
-        }
-
-        _searchText = string.Empty;
-        OnPropertyChanged(nameof(SearchText));
-        RefreshFilterDisplay();
-    }
-
-    /// <summary>
-    /// Toggles the checked state of the highlighted filter node.
-    /// </summary>
-    public void FilterToggleChecked()
-    {
-        if (HighlightedItem == null) return;
-        if (!_filterNodeMap.TryGetValue(HighlightedItem.ElementId, out var node)) return;
-
-        node.Toggle();
-        RefreshFilterDisplay();
-    }
-
-    /// <summary>
-    /// Returns all checked leaf ElementIds from the filter tree.
-    /// </summary>
-    public HashSet<long> GetFilterCheckedElementIds()
-    {
-        var result = new HashSet<long>();
-        foreach (var root in _filterRootNodes)
-        {
-            foreach (var id in root.GetCheckedLeafIds())
-                result.Add(id);
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Builds BrowserItem wrappers for the current filter level and populates Results.
-    /// </summary>
-    private void RefreshFilterDisplay()
-    {
-        // Remember the current highlight position before rebuilding
-        int prevHighlightIndex = HighlightedItem != null ? Results.IndexOf(HighlightedItem) : -1;
-
-        _cachedUnifiedList = null;
-        _filterNodeMap.Clear();
-
-        var nodes = _filterCurrentNodes;
-
-        // Apply fuzzy filter if search text is non-empty
-        if (!string.IsNullOrWhiteSpace(_searchText))
-        {
-            var query = _searchText.ToLowerInvariant();
-            nodes = nodes.Where(n => n.Name.ToLowerInvariant().Contains(query)).ToList();
-        }
-
-        var items = new List<BrowserItem>();
-        long nextId = -2000;
-
-        foreach (var node in nodes)
-        {
-            // Segoe MDL2 Assets glyphs — consistent sizing across all states
-            string checkGlyph = node.IsChecked switch
-            {
-                true => "\uE73A",   // CheckboxComposite (filled check)
-                false => "\uE739",  // Checkbox (empty square)
-                null => "\uE73C"    // CheckboxCompositeReversed (partial/indeterminate)
-            };
-
-            string name = node.Level == SelectionFilterLevel.Instance
-                ? (node.InstanceLabel ?? $"#{node.LeafElementIds.FirstOrDefault()}")
-                : $"{node.Name} ({node.TotalCount})";
-
-            string category = node.Level switch
-            {
-                SelectionFilterLevel.Category => $"{node.TotalCount} elements",
-                SelectionFilterLevel.Family => $"{node.Children.Count} types",
-                SelectionFilterLevel.Type => $"{node.TotalCount} instances",
-                SelectionFilterLevel.Instance => $"#{node.LeafElementIds.FirstOrDefault()}",
-                _ => ""
-            };
-
-            var itemId = nextId--;
-            var item = new BrowserItem
-            {
-                Name = name,
-                Category = category,
-                ElementId = itemId,
-                Kind = BrowserItemKind.Shebang, // hides star button
-                CheckGlyph = checkGlyph,
-                GroupKey = node.Level.ToString().ToUpperInvariant()
-            };
-
-            items.Add(item);
-            _filterNodeMap[itemId] = node;
-        }
-
-        Results.ReplaceAll(items);
-
-        // Count checked items
-        int checkedCount = 0;
-        foreach (var root in _filterRootNodes)
-            checkedCount += root.GetCheckedLeafIds().Count;
-
-        StatusText = $"{FilterBreadcrumb} \u2014 {checkedCount} of {_filterTotalCount} selected";
-
-        // Preserve highlight position (e.g. after Space toggle) instead of jumping to top
-        if (prevHighlightIndex >= 0 && prevHighlightIndex < Results.Count)
-            HighlightedItem = Results[prevHighlightIndex];
-        else if (Results.Count > 0)
-            HighlightedItem = Results[0];
-        else
-            HighlightedItem = null;
     }
 
     // ── In-Pane Report Mode ─────────────────────────────────────────
@@ -608,21 +614,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     // plain data (ReportPage/ReportRow); anything Revit-specific is built by the
     // caller and handed in.
 
-    private bool _isInReportMode;
-    public bool IsInReportMode
-    {
-        get => _isInReportMode;
-        set
-        {
-            _isInReportMode = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(ModePillText));
-            OnPropertyChanged(nameof(ReportFooterHint));
-            OnPropertyChanged(nameof(PlaceholderText));
-            OnPropertyChanged(nameof(HasModePill));
-        }
-    }
-
     /// <summary>Pill text for the current report, e.g. "CAD" or "PATTERNS".</summary>
     private string _reportPillText = "REPORT";
     public string ReportPillText
@@ -631,7 +622,22 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         private set { _reportPillText = value; OnPropertyChanged(); OnPropertyChanged(nameof(ModePillText)); }
     }
 
-    private readonly Stack<ReportPage> _reportStack = new();
+    /// <summary>
+    /// Which accent colour family the pill uses for this report: "Shebang"
+    /// (purple, the default) or "Filter" (gold, used by the Selection Filter).
+    /// </summary>
+    private string _reportAccent = "Shebang";
+    public string ReportAccent
+    {
+        get => _reportAccent;
+        private set { _reportAccent = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// Pages behind the current one, each with the row the cursor was on, so
+    /// going back lands where you came from instead of at the top.
+    /// </summary>
+    private readonly Stack<(ReportPage Page, int CursorIndex)> _reportStack = new();
     private ReportPage? _reportPage;
 
     /// <summary>Maps synthetic result IDs back to the row they came from.</summary>
@@ -643,15 +649,30 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// </summary>
     private Func<ReportRow, ReportPage?>? _reportDrillProvider;
 
+    /// <summary>
+    /// Built from what the page can actually do, so every report describes its
+    /// keys in the same words and never advertises a key that does nothing.
+    /// </summary>
     public string ReportFooterHint
     {
         get
         {
-            if (!IsInReportMode) return string.Empty;
-            if (!string.IsNullOrEmpty(_reportPage?.Hint)) return _reportPage!.Hint;
-            return _reportStack.Count > 0
-                ? "Enter: open · Esc: back · ↑↓: navigate · Type: filter"
-                : "Enter: open · Esc: close · ↑↓: navigate · Type: filter";
+            var page = _reportPage;
+            if (!IsInReportMode || page == null) return string.Empty;
+
+            var parts = new List<string>();
+
+            if (page.Rows.Any(r => r.IsCheckable))
+                parts.Add("Space: tick · Ctrl+A/D: all/none");
+            if (page.Rows.Any(r => r.DrillKey != null))
+                parts.Add("Enter/→: open");
+            else if (page.Rows.Any(r => r.ActionKey != null || r.RevitElementId != 0))
+                parts.Add("Enter: run");
+            if (page.PrimaryActionKey != null)
+                parts.Add($"Ctrl+Enter: {page.PrimaryActionLabel}");
+
+            parts.Add(_reportStack.Count > 0 ? "Esc/←: back" : "Esc: close quip");
+            return string.Join(" · ", parts);
         }
     }
 
@@ -665,11 +686,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// Drops the back history. Used after an action changes the model, when the
     /// pages behind describe a state that no longer exists.
     /// </summary>
-    public void ClearReportStack()
-    {
-        _reportStack.Clear();
-        OnPropertyChanged(nameof(ReportCanGoBack));
-    }
+    public void ClearReportStack() => _reportStack.Clear();
 
     /// <summary>Fired when Enter lands on a row carrying an ActionKey.</summary>
     public event Action<ReportRow>? ReportActionRequested;
@@ -681,36 +698,31 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// Opens the report surface on <paramref name="root"/>.
     /// </summary>
     public void EnterReportMode(ReportPage root, string pillText,
-                                Func<ReportRow, ReportPage?>? drillProvider = null)
+                                Func<ReportRow, ReportPage?>? drillProvider = null,
+                                string accent = "Shebang")
     {
-        _reportStack.Clear();
+        ClearSurfaceState();
         _reportPage = root;
         _reportDrillProvider = drillProvider;
         ReportPillText = pillText;
+        ReportAccent = accent;
 
         _searchText = string.Empty;
         OnPropertyChanged(nameof(SearchText));
+        HighlightedItem = null;
 
-        IsInReportMode = true;
+        Surface = PaneSurface.Report;
         RefreshReportDisplay();
     }
 
-    public void ExitReportMode()
-    {
-        IsInReportMode = false;
-        _reportStack.Clear();
-        _reportPage = null;
-        _reportDrillProvider = null;
-        _reportRowMap.Clear();
+    /// <summary>Swaps the current page in place. Used to show an action's result.</summary>
+    public void ReplaceReportPage(ReportPage page) => ShowReportPage(page, -1);
 
-        _searchText = string.Empty;
-        OnPropertyChanged(nameof(SearchText));
-        _debounceTimer.Stop();
-        RefreshResults();
-    }
-
-    /// <summary>Swaps the current page in place — used to show an action's result.</summary>
-    public void ReplaceReportPage(ReportPage page)
+    /// <summary>
+    /// Puts <paramref name="page"/> on screen with the cursor on
+    /// <paramref name="cursorIndex"/> (or on the first real row when negative).
+    /// </summary>
+    private void ShowReportPage(ReportPage page, int cursorIndex)
     {
         // A new page means the old cursor position is meaningless.
         HighlightedItem = null;
@@ -718,28 +730,45 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         _searchText = string.Empty;
         OnPropertyChanged(nameof(SearchText));
         RefreshReportDisplay();
+
+        if (cursorIndex >= 0 && cursorIndex < Results.Count)
+            HighlightedItem = Results[cursorIndex];
     }
 
     /// <summary>Pushes a child page, keeping the current one for Escape.</summary>
     public void PushReportPage(ReportPage page)
     {
-        if (_reportPage != null) _reportStack.Push(_reportPage);
-        ReplaceReportPage(page);
-        OnPropertyChanged(nameof(ReportCanGoBack));
+        if (_reportPage != null)
+        {
+            int cursor = HighlightedItem != null ? Results.IndexOf(HighlightedItem) : -1;
+            // The cursor index is only valid against the unfiltered page.
+            if (!string.IsNullOrWhiteSpace(_searchText)) cursor = -1;
+            _reportStack.Push((_reportPage, cursor));
+        }
+        ShowReportPage(page, -1);
     }
 
     /// <summary>Pops back one page. Returns false when already at the root.</summary>
     public bool ReportGoBack()
     {
         if (_reportStack.Count == 0) return false;
-        ReplaceReportPage(_reportStack.Pop());
-        OnPropertyChanged(nameof(ReportCanGoBack));
+        var (page, cursor) = _reportStack.Pop();
+        ShowReportPage(page, cursor);
         return true;
     }
 
+    /// <summary>The report row behind the highlighted list item, if any.</summary>
+    private ReportRow? HighlightedReportRow()
+    {
+        if (HighlightedItem == null) return null;
+        _reportRowMap.TryGetValue(HighlightedItem.ElementId, out var row);
+        return row;
+    }
+
     /// <summary>
-    /// Handles Enter on the highlighted report row: back row, drill, action, or
-    /// select-in-model. Returns true if the row did something.
+    /// Enter (or double-click) on the highlighted report row: the row's main
+    /// action. That is go back, open, run, select in model, or, for a plain
+    /// tick row, tick it. Returns true if the row did something.
     /// </summary>
     public bool ActivateHighlightedReportRow()
     {
@@ -747,15 +776,10 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
         if (HighlightedItem.IsBackRow) return ReportGoBack();
 
-        if (!_reportRowMap.TryGetValue(HighlightedItem.ElementId, out var row)) return false;
+        var row = HighlightedReportRow();
+        if (row == null) return false;
 
-        if (row.DrillKey != null)
-        {
-            var child = _reportDrillProvider?.Invoke(row);
-            if (child == null) return false;
-            PushReportPage(child);
-            return true;
-        }
+        if (row.DrillKey != null) return DrillHighlightedReportRow();
 
         if (row.ActionKey != null)
         {
@@ -769,8 +793,43 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             return true;
         }
 
-        return false;
+        return ToggleHighlightedReportRow();
     }
+
+    /// <summary>
+    /// Right arrow: open the highlighted row's child page. Deliberately does
+    /// nothing on action rows, so an arrow key can never delete anything.
+    /// </summary>
+    public bool DrillHighlightedReportRow()
+    {
+        var row = HighlightedReportRow();
+        if (row?.DrillKey == null) return false;
+
+        var child = _reportDrillProvider?.Invoke(row);
+        if (child == null) return false;
+
+        PushReportPage(child);
+        return true;
+    }
+
+    /// <summary>
+    /// Ctrl+Enter: run the page's primary action (apply, delete selected...)
+    /// from wherever the cursor is. Returns false when the page has none.
+    /// </summary>
+    public bool ActivateReportPrimaryAction()
+    {
+        var key = _reportPage?.PrimaryActionKey;
+        if (key == null) return false;
+
+        var row = _reportPage!.Rows.FirstOrDefault(r => r.ActionKey == key);
+        if (row == null) return false;
+
+        ReportActionRequested?.Invoke(row);
+        return true;
+    }
+
+    /// <summary>True when the current page has at least one tick row.</summary>
+    public bool ReportHasCheckableRows => _reportPage?.Rows.Any(r => r.IsCheckable) ?? false;
 
     /// <summary>
     /// Toggles the checkbox on the highlighted row. Returns false when the row
@@ -778,9 +837,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// </summary>
     public bool ToggleHighlightedReportRow()
     {
-        if (HighlightedItem == null) return false;
-        if (!_reportRowMap.TryGetValue(HighlightedItem.ElementId, out var row)) return false;
-        if (!row.IsCheckable) return false;
+        var row = HighlightedReportRow();
+        if (row == null || !row.IsCheckable) return false;
 
         if (row.OnToggle != null) row.OnToggle(row);
         else row.IsChecked = !(row.IsChecked ?? false);
@@ -819,7 +877,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>Projects the current page (filtered by the search box) into Results.</summary>
     private void RefreshReportDisplay()
     {
-        _cachedUnifiedList = null;
         _reportRowMap.Clear();
 
         int prevHighlightIndex = HighlightedItem != null ? Results.IndexOf(HighlightedItem) : -1;
@@ -899,28 +956,18 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         if (prevHighlightIndex >= 0 && prevHighlightIndex < items.Count)
             HighlightedItem = items[prevHighlightIndex];
         else
-            HighlightedItem = items.FirstOrDefault(i => !i.IsBackRow) ?? items.FirstOrDefault();
+            HighlightedItem =
+                items.FirstOrDefault(i => page.InitialCursorRow != null
+                    && _reportRowMap.TryGetValue(i.ElementId, out var r)
+                    && ReferenceEquals(r, page.InitialCursorRow))
+                ?? items.FirstOrDefault(i => !i.IsBackRow)
+                ?? items.FirstOrDefault();
 
-        OnPropertyChanged(nameof(ReportFooterHint));
         OnPropertyChanged(nameof(ReportCanGoBack));
+        NotifyFooterHint();
     }
 
     // ── Property Inspector Mode ─────────────────────────────────────
-
-    private bool _isInInspectorMode;
-    public bool IsInInspectorMode
-    {
-        get => _isInInspectorMode;
-        set
-        {
-            _isInInspectorMode = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(ModePillText));
-            OnPropertyChanged(nameof(InspectorFooterHint));
-            OnPropertyChanged(nameof(PlaceholderText));
-            OnPropertyChanged(nameof(HasModePill));
-        }
-    }
 
     private List<InspectorParameterItem> _inspectorParams = new();
     private Dictionary<long, InspectorParameterItem> _inspectorParamMap = new();
@@ -952,7 +999,11 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             if (!IsInInspectorMode) return string.Empty;
             if (IsInspectorEditMode)
                 return "Enter: save \u00b7 Esc: cancel \u00b7 Tab: next \u00b7 Shift+Tab: prev";
-            return "Enter: edit \u00b7 Esc: close \u00b7 \u2191\u2193: navigate \u00b7 Type: filter";
+            if (InspectorIsMixedCategory)
+                return "Enter/\u2192: open \u00b7 Esc: close quip";
+            return InspectorDrilledCategory != null
+                ? "Enter: edit \u00b7 Space: toggle yes/no \u00b7 Esc/\u2190: back"
+                : "Enter: edit \u00b7 Space: toggle yes/no \u00b7 Esc: close quip";
         }
     }
 
@@ -964,9 +1015,10 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         get => _isInspectorEditMode;
         set
         {
+            if (_isInspectorEditMode == value) return;
             _isInspectorEditMode = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(InspectorFooterHint));
+            NotifyFooterHint();
         }
     }
 
@@ -991,48 +1043,25 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public event Action<InspectorParameterItem, string>? InspectorEditConfirmed;
 
     /// <summary>
-    /// Fired when inspector needs a parameter refresh (after edit).
-    /// </summary>
-    public event Action? InspectorRefreshRequested;
-
-    /// <summary>
     /// Enters inspector mode with the given parameter list.
     /// </summary>
-    public void EnterInspectorMode(List<InspectorParameterItem> items, string breadcrumb, bool isMixedCategory)
+    public void EnterInspectorMode(List<InspectorParameterItem> items, string breadcrumb,
+                                   bool isMixedCategory, List<long> elementIds)
     {
+        ClearSurfaceState();
         _inspectorParams = items;
-        _inspectorNavStack.Clear();
+        InspectorElementIds = elementIds;
+        InspectorElementCount = elementIds.Count;
         InspectorIsMixedCategory = isMixedCategory;
-        InspectorDrilledCategory = null;
         InspectorBreadcrumb = $"INSPECT \u00b7 {breadcrumb}";
 
         _searchText = string.Empty;
         OnPropertyChanged(nameof(SearchText));
+        HighlightedItem = null;
 
-        IsInInspectorMode = true;
+        Surface = PaneSurface.Inspector;
         RefreshInspectorDisplay();
-    }
-
-    /// <summary>
-    /// Exits inspector mode and restores normal view.
-    /// </summary>
-    public void ExitInspectorMode()
-    {
-        IsInInspectorMode = false;
-        IsInspectorEditMode = false;
-        EditingInspectorParam = null;
-        _inspectorParams.Clear();
-        _inspectorParamMap.Clear();
-        _inspectorNavStack.Clear();
-        InspectorElementIds.Clear();
-        InspectorIsMixedCategory = false;
-        InspectorDrilledCategory = null;
-        InspectorBreadcrumb = "INSPECT";
-
-        _searchText = string.Empty;
-        OnPropertyChanged(nameof(SearchText));
-        _debounceTimer.Stop();
-        RefreshResults();
+        NotifyFooterHint();
     }
 
     /// <summary>
@@ -1061,7 +1090,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         _inspectorParams = items;
         InspectorIsMixedCategory = false;
         InspectorBreadcrumb = $"INSPECT \u00b7 {breadcrumb}";
+        HighlightedItem = null;
         RefreshInspectorDisplay();
+        NotifyFooterHint();
     }
 
     /// <summary>
@@ -1079,7 +1110,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
         _searchText = string.Empty;
         OnPropertyChanged(nameof(SearchText));
+        HighlightedItem = null;
         RefreshInspectorDisplay();
+        NotifyFooterHint();
     }
 
     /// <summary>
@@ -1092,7 +1125,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         // ElementId params not editable in V1
         if (param.StorageType == 4) // StorageType.ElementId
         {
-            ShowInlineError("ElementId parameters \u2014 editing coming in a future update");
+            ShowInlineError("This parameter points at another element and can't be edited here yet");
             return;
         }
 
@@ -1202,7 +1235,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     {
         int prevHighlightIndex = HighlightedItem != null ? Results.IndexOf(HighlightedItem) : -1;
 
-        _cachedUnifiedList = null;
         _inspectorParamMap.Clear();
 
         var sourceParams = _inspectorParams;
@@ -1266,7 +1298,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         if (InspectorIsMixedCategory)
             StatusText = $"{InspectorBreadcrumb}";
         else
-            StatusText = $"{InspectorBreadcrumb} \u2014 {sourceParams.Count(p => !p.IsDivider)} parameters";
+            StatusText = $"{InspectorBreadcrumb} \u00b7 {sourceParams.Count(p => !p.IsDivider)} parameters";
 
         // Restore highlight
         if (prevHighlightIndex >= 0 && prevHighlightIndex < Results.Count)
@@ -1288,21 +1320,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     }
 
     // ── Parameter Filter Mode (!pf) ────────────────────────────────
-
-    private bool _isInParameterFilterMode;
-    public bool IsInParameterFilterMode
-    {
-        get => _isInParameterFilterMode;
-        set
-        {
-            _isInParameterFilterMode = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(ModePillText));
-            OnPropertyChanged(nameof(HasModePill));
-            OnPropertyChanged(nameof(PlaceholderText));
-            OnPropertyChanged(nameof(ParamFilterFooterHint));
-        }
-    }
 
     private ParamFilterField _paramFilterFocus = ParamFilterField.Scope;
     public ParamFilterField ParamFilterFocus
@@ -1373,7 +1390,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     }
 
     public string ParamFilterFooterHint => IsInParameterFilterMode
-        ? "Tab next · Shift+Tab back · Enter pick/execute · Esc cancel"
+        ? "Enter: pick · Tab/Shift+Tab: next/previous field · Ctrl+Enter: run · Esc: close quip"
         : string.Empty;
 
     /// <summary>
@@ -1400,13 +1417,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// </summary>
     public void EnterParameterFilterMode(List<string> parameterNames)
     {
+        ClearSurfaceState();
         _paramFilterAllParams = parameterNames;
-        _paramFilterAllValues = new();
         _paramFilterScopeValue = ParamFilterScope.EntireProject;
-        _paramFilterParameterName = null;
-        _paramFilterRuleValue = null;
-        _paramFilterValueText = string.Empty;
-        _paramFilterFocus = ParamFilterField.Scope;
 
         _searchText = string.Empty;
         OnPropertyChanged(nameof(SearchText));
@@ -1420,27 +1433,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsParamRuleFocused));
         OnPropertyChanged(nameof(IsParamValueFocused));
 
-        IsInParameterFilterMode = true;
+        Surface = PaneSurface.ParamFilter;
         RefreshParameterFilterDisplay();
-    }
-
-    /// <summary>
-    /// Exits Parameter Filter mode and restores the normal Browser surface.
-    /// </summary>
-    public void ExitParameterFilterMode()
-    {
-        IsInParameterFilterMode = false;
-        _paramFilterAllParams.Clear();
-        _paramFilterAllValues.Clear();
-        _paramFilterParameterName = null;
-        _paramFilterRuleValue = null;
-        _paramFilterValueText = string.Empty;
-        _paramFilterFocus = ParamFilterField.Scope;
-
-        _searchText = string.Empty;
-        OnPropertyChanged(nameof(SearchText));
-        _debounceTimer.Stop();
-        RefreshResults();
     }
 
     /// <summary>
@@ -1570,7 +1564,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             ParamFilterField.Parameter => $"{_paramFilterAllParams.Count} parameters in scope",
             ParamFilterField.Rule => "Choose how the value should match",
             ParamFilterField.Value => _paramFilterAllValues.Count > 0
-                ? $"{_paramFilterAllValues.Count} known values — type your own or pick one"
+                ? $"{_paramFilterAllValues.Count} known values. Type your own or pick one"
                 : "Type a value",
             _ => string.Empty
         };
@@ -1635,16 +1629,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public BulkObservableCollection<BrowserItem> TopRankedItems { get; } = new();
 
     public event Action<BrowserItem>? ItemSelectionRequested;
-    public event Action<BrowserItem>? ItemOpenRequested;
     public event Action? FavoritesChanged;
     public event Action? FocusSearchRequested;
-
-    public void RequestFocusSearch()
-    {
-        SearchText = string.Empty;
-        HighlightedItem = null;
-        FocusSearchRequested?.Invoke();
-    }
 
     /// <summary>
     /// Restores a previously saved mode and search text on pane open.
@@ -1675,15 +1661,16 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         FocusSearchRequested?.Invoke();
     }
 
-    public void RequestOpen(BrowserItem item) => ItemOpenRequested?.Invoke(item);
-
     /// <summary>
     /// Builds a unified list of favorites + results for keyboard navigation.
+    ///
+    /// Built fresh on every keypress on purpose. It used to be cached, and any
+    /// screen that rebuilt its rows without clearing the cache left Up/Down
+    /// walking rows that were no longer on screen. The list is at most a few
+    /// hundred items, so there is nothing worth caching.
     /// </summary>
     private List<BrowserItem> GetUnifiedList()
     {
-        if (_cachedUnifiedList != null) return _cachedUnifiedList;
-
         var list = new List<BrowserItem>(Favorites.Count + Results.Count);
         // Only include favorites in Browser mode (they're hidden in other modes)
         if (ShowFavorites)
@@ -1695,7 +1682,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             if (ShowFavorites && res.IsFavorite) continue;
             list.Add(res);
         }
-        _cachedUnifiedList = list;
         return list;
     }
 
@@ -1704,38 +1690,17 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         var unified = GetUnifiedList();
         if (unified.Count == 0) return;
 
-        if (HighlightedItem == null)
+        // No cursor yet, or the cursor is on a row that is no longer listed:
+        // start from the top (Down) or the bottom (Up).
+        int index = HighlightedItem == null ? -1 : unified.IndexOf(HighlightedItem);
+        if (index < 0)
         {
             HighlightedItem = direction > 0 ? unified[0] : unified[^1];
             return;
         }
 
-        int index = unified.IndexOf(HighlightedItem);
         int newIndex = Math.Clamp(index + direction, 0, unified.Count - 1);
         HighlightedItem = unified[newIndex];
-    }
-
-    public bool OpenHighlighted()
-    {
-        if (HighlightedItem == null) return false;
-
-        // Two-stage family navigation: drill into family on Enter at Stage 1
-        if (IsFamilyMode && FamilyNavigationStage == FamilyNavigationStage.FamilyLevel
-            && HighlightedItem.TypeCount > 0)
-        {
-            DrillIntoFamily(HighlightedItem);
-            return true;
-        }
-
-        // Back row in Stage 2
-        if (HighlightedItem.IsBackRow)
-        {
-            NavigateBackToFamilies();
-            return true;
-        }
-
-        ItemOpenRequested?.Invoke(HighlightedItem);
-        return true;
     }
 
     public void LoadCommands(List<BrowserItem> commands)
@@ -1837,8 +1802,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     public void RefreshResults()
     {
-        _cachedUnifiedList = null;
-
         // In report mode, route to the in-pane report surface
         if (IsInReportMode)
         {
@@ -1851,13 +1814,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         {
             ParamFilterSyncValueFromSearch();
             RefreshParameterFilterDisplay();
-            return;
-        }
-
-        // In selection filter mode, route to filter display instead
-        if (IsInSelectionFilterMode)
-        {
-            RefreshFilterDisplay();
             return;
         }
 
@@ -1915,7 +1871,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             // Unified Browser surface
             if (FamilyNavigationStage == FamilyNavigationStage.TypeLevel && SelectedFamilyForDrilldown != null)
             {
-                RefreshUnifiedTypeLevel();
+                RefreshTypeLevel();
             }
             else if (string.IsNullOrWhiteSpace(_searchText))
             {
@@ -1943,6 +1899,14 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     private void RefreshFamilyResults()
     {
+        // Stage 2 (types of one family) is the same list in > mode and in the
+        // unified search, so both use the one method.
+        if (FamilyNavigationStage == FamilyNavigationStage.TypeLevel && SelectedFamilyForDrilldown != null)
+        {
+            RefreshTypeLevel();
+            return;
+        }
+
         var (query, categoryFilter) = ParseFamilyInput();
 
         var source = _allItems.Where(i => i.Kind == BrowserItemKind.FamilyType);
@@ -1956,78 +1920,44 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
         var sourceList = source.ToList();
 
-        if (FamilyNavigationStage == FamilyNavigationStage.TypeLevel && SelectedFamilyForDrilldown != null)
+        // Stage 1: show families (grouped by category)
+        var filtered = FuzzyMatcher.Match(sourceList, query);
+        int totalMatched = filtered.Count;
+
+        // Group by family name, create summary rows
+        var resultList = new List<BrowserItem>();
+        var familyGroups = filtered
+            .GroupBy(i => new { i.FamilyName, i.Category })
+            .OrderBy(g => g.Key.Category, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(g => g.Key.FamilyName, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxResults);
+
+        foreach (var group in familyGroups)
         {
-            // Stage 2: show types within the selected family
-            var types = sourceList
-                .Where(i => i.FamilyName == SelectedFamilyForDrilldown)
-                .ToList();
-
-            var resultList = new List<BrowserItem>();
-
-            // Add back row
+            var first = group.First();
             resultList.Add(new BrowserItem
             {
-                Name = $"\u2190 {SelectedFamilyForDrilldown}",
-                Category = "",
-                ElementId = -1,
+                Name = group.Key.FamilyName ?? first.Name,
+                Category = group.Key.Category ?? "Family",
+                ElementId = first.ElementId,
                 Kind = BrowserItemKind.FamilyType,
-                IsBackRow = true,
-                GroupKey = SelectedFamilyForDrilldown.ToUpperInvariant()
+                FamilyName = group.Key.FamilyName,
+                TypeCount = group.Count(),
+                GroupKey = (group.Key.Category ?? "FAMILY").ToUpperInvariant()
             });
-
-            foreach (var item in types)
-            {
-                item.GroupKey = SelectedFamilyForDrilldown.ToUpperInvariant();
-                resultList.Add(item);
-            }
-
-            Results.ReplaceAll(resultList);
-
-            StatusText = $"{types.Count} {(types.Count == 1 ? "type" : "types")} in {SelectedFamilyForDrilldown}";
-            HighlightedItem = Results.Count > 1 ? Results[1] : (Results.Count > 0 ? Results[0] : null);
         }
-        else
-        {
-            // Stage 1: show families (grouped by category)
-            var filtered = FuzzyMatcher.Match(sourceList, query);
-            int totalMatched = filtered.Count;
 
-            // Group by family name, create summary rows
-            var resultList = new List<BrowserItem>();
-            var familyGroups = filtered
-                .GroupBy(i => new { i.FamilyName, i.Category })
-                .OrderBy(g => g.Key.Category, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(g => g.Key.FamilyName, StringComparer.OrdinalIgnoreCase)
-                .Take(MaxResults);
+        Results.ReplaceAll(resultList);
 
-            foreach (var group in familyGroups)
-            {
-                var first = group.First();
-                resultList.Add(new BrowserItem
-                {
-                    Name = group.Key.FamilyName ?? first.Name,
-                    Category = group.Key.Category ?? "Family",
-                    ElementId = first.ElementId,
-                    Kind = BrowserItemKind.FamilyType,
-                    FamilyName = group.Key.FamilyName,
-                    TypeCount = group.Count(),
-                    GroupKey = (group.Key.Category ?? "FAMILY").ToUpperInvariant()
-                });
-            }
+        var statusParts = new List<string> { "Place Mode" };
+        if (!string.IsNullOrEmpty(categoryFilter))
+            statusParts.Add($"-c {categoryFilter}");
+        string prefix = string.Join(" ", statusParts);
 
-            Results.ReplaceAll(resultList);
-
-            var statusParts = new List<string> { "Place Mode" };
-            if (!string.IsNullOrEmpty(categoryFilter))
-                statusParts.Add($"-c {categoryFilter}");
-            string prefix = string.Join(" ", statusParts);
-
-            StatusText = string.IsNullOrWhiteSpace(query)
-                ? $"{prefix} \u2014 {Results.Count} families"
-                : $"{prefix} \u2014 {Results.Count} families ({totalMatched} {(totalMatched == 1 ? "type" : "types")})";
-            HighlightedItem = Results.Count > 0 ? Results[0] : null;
-        }
+        StatusText = string.IsNullOrWhiteSpace(query)
+            ? $"{prefix} \u00b7 {Results.Count} families"
+            : $"{prefix} \u00b7 {Results.Count} families ({totalMatched} {(totalMatched == 1 ? "type" : "types")})";
+        HighlightedItem = Results.Count > 0 ? Results[0] : null;
     }
 
     /// <summary>
@@ -2127,7 +2057,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// Type-level drilldown inside the unified surface. Shows all types of the
     /// selected family with a back row, mirroring Place mode Stage 2.
     /// </summary>
-    private void RefreshUnifiedTypeLevel()
+    private void RefreshTypeLevel()
     {
         if (SelectedFamilyForDrilldown == null) return;
 
@@ -2138,6 +2068,18 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
         if (FilterPlacedTypes)
             types = types.Where(i => i.IsPlacedInProject).ToList();
+
+        int allTypes = types.Count;
+
+        // Typing narrows the types of this family (plain "contains" match on
+        // the type name, like the filter box inside a quip).
+        var typed = _searchText.Trim();
+        if (typed.Length > 0)
+        {
+            types = types
+                .Where(i => (i.TypeName ?? i.Name).Contains(typed, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
 
         var resultList = new List<BrowserItem>
         {
@@ -2159,7 +2101,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         }
 
         Results.ReplaceAll(resultList);
-        StatusText = $"{types.Count} {(types.Count == 1 ? "type" : "types")} in {SelectedFamilyForDrilldown}";
+        StatusText = types.Count == allTypes
+            ? $"{allTypes} {(allTypes == 1 ? "type" : "types")} in {SelectedFamilyForDrilldown}"
+            : $"{types.Count} of {allTypes} types in {SelectedFamilyForDrilldown}";
         HighlightedItem = Results.Count > 1 ? Results[1] : (Results.Count > 0 ? Results[0] : null);
     }
 
@@ -2181,7 +2125,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
 
     private void RefreshFavorites()
     {
-        _cachedUnifiedList = null;
         Favorites.ReplaceAll(_allItems.Where(i => i.IsFavorite).ToList());
         HasFavorites = Favorites.Count > 0;
     }
@@ -2263,7 +2206,7 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         }
 
         if (counts.Count == 0)
-            return "No results — try a different spelling";
+            return "No results. Try a different spelling";
 
         // Build parts like "12 views · 3 sheets"
         var parts = counts.Select(kv => $"{kv.Value} {kv.Key}");
@@ -2307,9 +2250,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     }
 
     public event Action<BrowserItem, QuickAction>? QuickActionRequested;
-    public event Action? RefreshRequested;
-
-    public void RequestRefresh() => RefreshRequested?.Invoke();
 
     public void OpenActionBar(BrowserItem item)
     {
@@ -2340,6 +2280,15 @@ public class FinderPaneViewModel : INotifyPropertyChanged
         FocusedAction = ActiveActions[newIndex];
     }
 
+    /// <summary>Tab / Shift+Tab on an open action bar: next pill, wrapping round.</summary>
+    public void CycleActionFocus(int direction)
+    {
+        if (ActiveActions.Count == 0) return;
+        int index = FocusedAction == null ? -1 : ActiveActions.IndexOf(FocusedAction);
+        int next = (index + direction + ActiveActions.Count) % ActiveActions.Count;
+        FocusedAction = ActiveActions[next];
+    }
+
     public bool ExecuteAction()
     {
         if (ActionBarItem == null || FocusedAction == null) return false;
@@ -2360,7 +2309,12 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public bool IsInlineRenameVisible
     {
         get => _isInlineRenameVisible;
-        set { _isInlineRenameVisible = value; OnPropertyChanged(); }
+        set
+        {
+            if (_isInlineRenameVisible == value) return;
+            _isInlineRenameVisible = value;
+            OnPropertyChanged();
+        }
     }
 
     private string _renameText = string.Empty;
@@ -2433,11 +2387,6 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             ConfirmExcelExport();
             return;
         }
-        if (IsShortcutEditMode)
-        {
-            ConfirmShortcutEdit();
-            return;
-        }
         InlineRenameConfirmed?.Invoke(RenameItem, RenameText, IsSheetRename ? RenameSheetNumber : null);
         CloseInlineRename();
     }
@@ -2445,43 +2394,11 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public void CloseInlineRename()
     {
         IsInlineRenameVisible = false;
-        IsShortcutEditMode = false;
         IsExcelExportMode = false;
         RenameItem = null;
         RenameText = string.Empty;
         RenameSheetNumber = string.Empty;
         IsSheetRename = false;
-    }
-
-    // ── Shortcut Editing ──────────────────────────────────────────
-
-    private bool _isShortcutEditMode;
-    public bool IsShortcutEditMode
-    {
-        get => _isShortcutEditMode;
-        set { _isShortcutEditMode = value; OnPropertyChanged(); }
-    }
-
-    public event Action<BrowserItem, string>? ShortcutEditConfirmed;
-
-    public void OpenShortcutEdit(BrowserItem item)
-    {
-        CloseActionBar();
-        ClearInlineError();
-        RenameItem = item;
-        IsSheetRename = false;
-        IsShortcutEditMode = true;
-        RenameText = (item.ShortcutKeys == "-") ? string.Empty : (item.ShortcutKeys ?? string.Empty);
-
-        IsInlineRenameVisible = true;
-        FocusRenameRequested?.Invoke();
-    }
-
-    public void ConfirmShortcutEdit()
-    {
-        if (RenameItem == null) return;
-        ShortcutEditConfirmed?.Invoke(RenameItem, RenameText);
-        CloseInlineRename();
     }
 
     // ── Excel Export ──────────────────────────────────────────────

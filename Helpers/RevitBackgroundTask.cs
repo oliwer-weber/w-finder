@@ -46,8 +46,20 @@ public class RevitBackgroundTask : IExternalEventHandler
         int count = _queue.Count;
         for (int i = 0; i < count; i++)
         {
-            if (_queue.TryDequeue(out var action))
+            if (!_queue.TryDequeue(out var action)) continue;
+
+            // One failing action must not take the rest of the queue down with
+            // it, and must never leave the user guessing: log it and show it.
+            try
+            {
                 action.Invoke(app);
+            }
+            catch (Exception ex)
+            {
+                QuipLog.WriteException("RevitBackgroundTask", ex);
+                try { App.ViewModel.ShowInlineError($"Quip error: {ex.Message}"); }
+                catch { /* the pane may not exist yet */ }
+            }
         }
     }
 
