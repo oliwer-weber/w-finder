@@ -1,4 +1,4 @@
-<UserControl x:Class="w_finder.Views.FinderPaneView"
+﻿<UserControl x:Class="w_finder.Views.FinderPaneView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:w_finder.Views"
@@ -728,6 +728,13 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
+                            <!-- Report field label (muted caption above the value) -->
+                            <TextBlock Text="{Binding DetailLabel}"
+                                       FontSize="10"
+                                       Margin="0,0,0,1"
+                                       Foreground="{DynamicResource MutedText}"
+                                       TextTrimming="CharacterEllipsis"
+                                       Visibility="{Binding DetailLabel, Converter={StaticResource NullToCollapsedConverter}}"/>
                             <!-- Normal item name -->
                             <TextBlock Text="{Binding Name}"
                                        FontSize="12"
@@ -858,6 +865,19 @@
                 BorderThickness="0,1,0,0"
                 Padding="12,6">
             <TextBlock Text="{Binding ParamFilterFooterHint}"
+                       FontSize="10"
+                       Foreground="{DynamicResource MutedText}"/>
+        </Border>
+
+        <!-- Row 6: Report mode hint bar (!dwg, !lp) -->
+        <Border x:Name="ReportHintBar"
+                Grid.Row="6"
+                Visibility="Collapsed"
+                Background="{DynamicResource PaneBackground}"
+                BorderBrush="{DynamicResource SeparatorBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="12,6">
+            <TextBlock Text="{Binding ReportFooterHint}"
                        FontSize="10"
                        Foreground="{DynamicResource MutedText}"/>
         </Border>

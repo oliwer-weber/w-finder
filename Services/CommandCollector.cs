@@ -78,9 +78,6 @@ public static class CommandCollector
             // Skip our own plugin commands
             if (entry.CommandId.Contains("Quip", StringComparison.OrdinalIgnoreCase)) continue;
 
-            // Skip third-party add-in commands — they cannot be posted via PostCommand()
-            if (entry.CommandId.StartsWith("CustomCtrl_", StringComparison.OrdinalIgnoreCase)) continue;
-
             var displayName = CleanXmlCommandName(entry.CommandName);
             var category = FormatPaths(entry.Paths);
             var shortcut = KeyboardShortcutService.GetShortcutByCommandId(entry.CommandId);

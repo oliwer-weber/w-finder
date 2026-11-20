@@ -31,10 +31,18 @@ public class FinderCommand : IExternalCommand
         {
             // Save current state before hiding (for "remember" launch behaviors)
             SettingsService.SaveLastState((int)App.ViewModel.ActiveMode, App.ViewModel.SearchText);
+            // Reset transient input state so it doesn't reappear on next open.
+            App.ViewModel.CloseInlineRename();
+            App.ViewModel.CloseActionBar();
             pane.Hide();
         }
         else
         {
+            // Defensive: if the pane was hidden by some other path (e.g. floating-pane
+            // close-X) while inline rename / action bar was open, clear it before showing.
+            App.ViewModel.CloseInlineRename();
+            App.ViewModel.CloseActionBar();
+
             // Refresh browser items before showing the pane
             var doc = uiApp.ActiveUIDocument?.Document;
             if (doc != null)

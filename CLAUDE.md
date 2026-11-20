@@ -10,10 +10,15 @@
 - If unsure about a Revit API detail, say so — the developer will test and report back.
 
 ## Environment & Paths
-- **Revit 2025 install:** `C:\Program Files\Autodesk\Revit 2025\`
+- **Supported Revit versions:** 2025, 2026, 2027. One project, version picked with `-p:RevitVersion=<YYYY>` (default 2025).
+- **Revit install:** `C:\Program Files\Autodesk\Revit <YYYY>\` (HintPaths follow `RevitVersion`)
 - **Revit API DLLs:** `RevitAPI.dll`, `RevitAPIUI.dll`, `AdWindows.dll` (all `<Private>false</Private>`)
-- **Target framework:** `net8.0-windows` with `<UseWPF>true</UseWPF>` and `<EnableDynamicLoading>true</EnableDynamicLoading>`
-- **Addins manifest:** `%AppData%\Autodesk\Revit\Addins\2025\`
+- **Target framework:** `net8.0-windows` for 2025/2026, `net10.0-windows` for 2027, with `<UseWPF>true</UseWPF>` and `<EnableDynamicLoading>true</EnableDynamicLoading>`
+- **Compile symbols:** `REVIT2025`/`REVIT2026`/`REVIT2027`, plus `REVIT2026_OR_GREATER`, `REVIT2027_OR_GREATER`
+- **Output:** `bin\<Config>\<YYYY>\`; obj is split per version via `Directory.Build.props`
+- **.NET 10 SDK:** user-local at `%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe` (PATH `dotnet` has SDK 8 only, which can't build 2027)
+- **Addins manifest:** `%AppData%\Autodesk\Revit\Addins\<YYYY>\`
+- **Adding a Revit version:** add the year to `#dim SupportedVersions[N]` in `installer\QuipSetup.iss` (bump N), and extend the TFM/DefineConstants conditions in `w_finder.csproj` if it changes .NET.
 
 ## Project Structure
 ```
@@ -85,9 +90,11 @@ All modes are detected by a single-character prefix in the search box. Mode dete
 
 ## Build & Test
 ```powershell
-dotnet build
-# First time: copy w_finder.addin to %AppData%\Autodesk\Revit\Addins\2025\
-# Close Revit before rebuilding (DLL lock).
+$dotnet = "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe"   # has the .NET 10 SDK
+& $dotnet build -p:RevitVersion=2027      # -> bin\Debug\2027\Quip.dll (2025/2026 work too)
+.\build-installer.ps1                     # Release build of every version + installer\output\QuipSetup.exe
+# Dev manifest: %AppData%\Autodesk\Revit\Addins\<YYYY>\Quip.addin pointing at bin\Debug\<YYYY>\Quip.dll
+# Close Revit before rebuilding the version it has loaded (DLL lock).
 # MSB3277 warnings are normal (Revit DLL version conflicts).
 ```
 

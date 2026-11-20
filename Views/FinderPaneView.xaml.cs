@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -35,6 +35,8 @@ public partial class FinderPaneView : UserControl
         App.ViewModel.ShortcutEditConfirmed += OnShortcutEditConfirmed;
         App.ViewModel.ExcelExportConfirmed += OnExcelExportConfirmed;
         App.ViewModel.RefreshRequested += OnRefreshRequested;
+        App.ViewModel.ReportActionRequested += OnReportActionRequested;
+        App.ViewModel.ReportElementActivated += OnReportElementActivated;
         App.ViewModel.InspectorEditConfirmed += OnInspectorEditConfirmed;
         App.ViewModel.InspectorRefreshRequested += OnInspectorRefreshRequested;
         App.ViewModel.ParamFilterParamSelected += OnParamFilterParamSelected;
@@ -134,6 +136,20 @@ public partial class FinderPaneView : UserControl
             var pfBg = WpfColor.FromArgb((byte)(255 * 0.22), pfColor.R, pfColor.G, pfColor.B);
             ModePillBorder.Background = new SolidColorBrush(pfBg);
             ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("FilterPillText");
+            return;
+        }
+
+        // Report mode borrows the quip purple — reports are always quip-launched
+        if (App.ViewModel.IsInReportMode)
+        {
+            var reportColor = (WpfColor)FindResource("ShebangAccentColor");
+            var reportBrush = new SolidColorBrush(reportColor);
+            reportBrush.Freeze();
+            ModePillBorder.BorderBrush = reportBrush;
+            ModePillBorder.BorderThickness = new Thickness(2, 1, 1, 1);
+            var reportBg = WpfColor.FromArgb((byte)(255 * 0.22), reportColor.R, reportColor.G, reportColor.B);
+            ModePillBorder.Background = new SolidColorBrush(reportBg);
+            ModePillTextBlock.Foreground = (SolidColorBrush)FindResource("ShebangPillText");
             return;
         }
 
@@ -354,7 +370,11 @@ public partial class FinderPaneView : UserControl
 
         // Group by GroupKey for all modes except Shebang, Selection Filter, Inspector,
         // and Parameter Filter (the last two have their own flat layouts).
-        if (!App.ViewModel.IsShebangMode && !App.ViewModel.IsInSelectionFilterMode
+        if (App.ViewModel.IsInReportMode)
+        {
+            view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BrowserItem.GroupKey)));
+        }
+        else if (!App.ViewModel.IsShebangMode && !App.ViewModel.IsInSelectionFilterMode
             && !App.ViewModel.IsInInspectorMode && !App.ViewModel.IsInParameterFilterMode)
         {
             view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(BrowserItem.GroupKey)));
@@ -411,6 +431,15 @@ public partial class FinderPaneView : UserControl
         if (e.PropertyName == nameof(FinderPaneViewModel.IsInParameterFilterMode))
         {
             ParamFilterHintBar.Visibility = App.ViewModel.IsInParameterFilterMode
+                ? WpfVisibility.Visible : WpfVisibility.Collapsed;
+            UpdateModePillAccent();
+            UpdateResultGrouping();
+            return;
+        }
+
+        if (e.PropertyName == nameof(FinderPaneViewModel.IsInReportMode))
+        {
+            ReportHintBar.Visibility = App.ViewModel.IsInReportMode
                 ? WpfVisibility.Visible : WpfVisibility.Collapsed;
             UpdateModePillAccent();
             UpdateResultGrouping();
@@ -639,6 +668,13 @@ public partial class FinderPaneView : UserControl
     {
         var vm = App.ViewModel;
 
+        // Report mode (!dwg, !lp) intercepts keys first
+        if (vm.IsInReportMode)
+        {
+            HandleReportKeyDown(e);
+            return;
+        }
+
         // Parameter Filter mode intercepts keys first
         if (vm.IsInParameterFilterMode)
         {
@@ -829,6 +865,26 @@ public partial class FinderPaneView : UserControl
                             LaunchParameterFilter();
                             break;
                         }
+                        if (shebangId == "dwg")
+                        {
+                            LaunchCadReport();
+                            break;
+                        }
+                        if (shebangId == "lp")
+                        {
+                            LaunchLinePatternCleanup();
+                            break;
+                        }
+                        if (shebangId == "ut")
+                        {
+                            LaunchUnusedTypes();
+                            break;
+                        }
+                        if (shebangId == "us")
+                        {
+                            LaunchUnusedTypesOfSelection();
+                            break;
+                        }
                         if (shebangId != null)
                         {
                             RevitBackgroundTask.Raise(uiApp =>
@@ -859,20 +915,31 @@ public partial class FinderPaneView : UserControl
                         {
                             RevitBackgroundTask.Raise(uiApp =>
                             {
+                                RevitCommandId? cmdId = null;
+                                bool canPost = false;
+                                Exception? postEx = null;
                                 try
                                 {
-                                    var cmdId = RevitCommandId.LookupPostableCommandId(postableCmd);
-                                    if (cmdId == null || !uiApp.CanPostCommand(cmdId))
+                                    cmdId = RevitCommandId.LookupPostableCommandId(postableCmd);
+                                    canPost = cmdId != null && uiApp.CanPostCommand(cmdId);
+                                    if (cmdId != null && canPost)
                                     {
-                                        Dispatcher.Invoke(() =>
-                                            App.ViewModel.ShowInlineError("Command not available in the current context"));
-                                        return;
+                                        var pane = uiApp.GetDockablePane(App.PaneId);
+                                        pane.Hide();
+                                        try { uiApp.PostCommand(cmdId); }
+                                        catch (Exception ex) { postEx = ex; }
                                     }
-                                    var pane = uiApp.GetDockablePane(App.PaneId);
-                                    pane.Hide();
-                                    uiApp.PostCommand(cmdId);
                                 }
-                                catch
+                                catch (Exception ex)
+                                {
+                                    postEx = ex;
+                                }
+                                finally
+                                {
+                                    CommandDiagnostics.LogAttempt("PostableCommand", cmdName, cmdId, canPost, uiApp, postEx);
+                                }
+
+                                if (cmdId == null || !canPost || postEx != null)
                                 {
                                     Dispatcher.Invoke(() =>
                                         App.ViewModel.ShowInlineError("Command not available in the current context"));
@@ -884,23 +951,75 @@ public partial class FinderPaneView : UserControl
                             var revitCmdIdStr = highlighted.RevitCommandId;
                             RevitBackgroundTask.Raise(uiApp =>
                             {
-                                try
+                                // 1) Shortcut path. If Revit has a keyboard shortcut assigned
+                                //    to this command, send those keys — that routes through
+                                //    Revit's own dispatcher, identical to a real keypress.
+                                //    Re-read from XML cache so same-session edits are picked up.
+                                var shortcut = KeyboardShortcutService.GetShortcutByCommandId(revitCmdIdStr);
+                                if (!string.IsNullOrEmpty(shortcut))
                                 {
-                                    var cmdId = RevitCommandId.LookupCommandId(revitCmdIdStr);
-                                    if (cmdId == null || !uiApp.CanPostCommand(cmdId))
-                                    {
-                                        Dispatcher.Invoke(() =>
-                                            App.ViewModel.ShowInlineError("Command not available in the current context"));
-                                        return;
-                                    }
                                     var pane = uiApp.GetDockablePane(App.PaneId);
                                     pane.Hide();
-                                    uiApp.PostCommand(cmdId);
+                                    bool keysSent = KeystrokeSimulator.TrySend(shortcut, uiApp.MainWindowHandle, out var keysDiag);
+                                    if (keysSent)
+                                    {
+                                        CommandDiagnostics.LogAttempt("Internal", revitCmdIdStr, null, false, uiApp, null, $"keys={keysDiag}");
+                                        return;
+                                    }
+                                    // Parse failed — fall through to other mechanisms.
+                                    // The pane is already hidden; that's fine.
+                                }
+
+                                // 2) Try ribbon-execute. Reaches internal system commands
+                                //    (ID_...) that PostCommand refuses, by invoking the live
+                                //    ribbon button's CommandHandler directly.
+                                bool ribbonOk = RibbonCommandInvoker.TryExecute(revitCmdIdStr, out var ribbonDiag);
+                                if (ribbonOk)
+                                {
+                                    CommandDiagnostics.LogAttempt("Internal", revitCmdIdStr, null, false, uiApp, null, ribbonDiag);
+                                    var pane = uiApp.GetDockablePane(App.PaneId);
+                                    pane.Hide();
+                                    return;
+                                }
+
+                                // 2) Fallback: PostCommand. Catches external add-in commands
+                                //    (CustomCtrl_...) that Revit accepts but that aren't in
+                                //    the live ribbon tree.
+                                RevitCommandId? cmdId = null;
+                                bool canPost = false;
+                                Exception? postEx = null;
+                                bool postAttempted = false;
+                                try
+                                {
+                                    cmdId = RevitCommandId.LookupCommandId(revitCmdIdStr);
+                                    if (cmdId != null)
+                                    {
+                                        canPost = uiApp.CanPostCommand(cmdId);
+                                        if (canPost)
+                                        {
+                                            var pane = uiApp.GetDockablePane(App.PaneId);
+                                            pane.Hide();
+                                            postAttempted = true;
+                                            try { uiApp.PostCommand(cmdId); }
+                                            catch (Exception ex) { postEx = ex; }
+                                        }
+                                    }
                                 }
                                 catch (Exception ex)
                                 {
-                                    Dispatcher.Invoke(() =>
-                                        App.ViewModel.ShowInlineError($"Command failed: {ex.Message}"));
+                                    postEx = ex;
+                                }
+                                finally
+                                {
+                                    CommandDiagnostics.LogAttempt("Internal", revitCmdIdStr, cmdId, canPost, uiApp, postEx, ribbonDiag);
+                                }
+
+                                if (!postAttempted || postEx != null)
+                                {
+                                    var msg = postEx != null
+                                        ? $"Command failed: {postEx.Message}"
+                                        : "Command not available in the current context";
+                                    Dispatcher.Invoke(() => App.ViewModel.ShowInlineError(msg));
                                 }
                             });
                         }
@@ -1163,6 +1282,26 @@ public partial class FinderPaneView : UserControl
                 LaunchParameterFilter();
                 return;
             }
+            if (shebangId == "dwg")
+            {
+                LaunchCadReport();
+                return;
+            }
+            if (shebangId == "lp")
+            {
+                LaunchLinePatternCleanup();
+                return;
+            }
+            if (shebangId == "ut")
+            {
+                LaunchUnusedTypes();
+                return;
+            }
+            if (shebangId == "us")
+            {
+                LaunchUnusedTypesOfSelection();
+                return;
+            }
             if (shebangId != null)
             {
                 RevitBackgroundTask.Raise(uiApp =>
@@ -1423,7 +1562,7 @@ public partial class FinderPaneView : UserControl
                 break;
 
             case Models.QuickActionKind.AssignShortcut:
-                App.ViewModel.OpenShortcutEdit(item);
+                OpenRevitShortcutDialogWithSearch(item);
                 break;
 
             case Models.QuickActionKind.RemoveShortcut:
@@ -1633,6 +1772,43 @@ public partial class FinderPaneView : UserControl
 
     // ── Shortcut Edit Handlers ─────────────────────────────────────
 
+    /// <summary>
+    /// Opens Revit's native Keyboard Shortcuts dialog and types the command name
+    /// into its search box, so the user only has to assign keys and click OK.
+    /// Revit's own OK handler does the hot-reload, so the new shortcut works
+    /// immediately — sidestepping the in-memory-binding refresh problem entirely.
+    /// </summary>
+    private void OpenRevitShortcutDialogWithSearch(BrowserItem item)
+    {
+        var searchTerm = item.Name;
+
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            try
+            {
+                var pane = uiApp.GetDockablePane(App.PaneId);
+                pane.Hide();
+
+                var cmdId = RevitCommandId.LookupPostableCommandId(PostableCommand.KeyboardShortcuts);
+                if (cmdId == null || !uiApp.CanPostCommand(cmdId)) return;
+                uiApp.PostCommand(cmdId);
+            }
+            catch
+            {
+                return;
+            }
+
+            // PostCommand only queues — dialog opens after this Raise() returns.
+            // Spawn a background task that waits for the dialog to appear and
+            // auto-focus its search box, then types the search term.
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                Thread.Sleep(300);
+                KeystrokeSimulator.SendText(searchTerm);
+            });
+        });
+    }
+
     private void OnShortcutEditConfirmed(BrowserItem item, string newShortcut)
     {
         var commandId = item.RevitCommandId;
@@ -1779,6 +1955,671 @@ public partial class FinderPaneView : UserControl
             SearchBox.Focus();
             Keyboard.Focus(SearchBox);
         });
+    }
+
+    // ── In-Pane Report: !ut (unused types) ────────────────────────
+    //
+    // Flow: scan → pick categories → confirm → delete. Selection is held on the
+    // type IDs rather than on the rows, so a category row and the type rows
+    // underneath it are always two views of the same truth.
+
+    /// <summary>The most recent unused-type scan, kept for the delete actions.</summary>
+    private UnusedTypeScan? _unusedScan;
+
+    /// <summary>Element IDs of the types currently ticked for deletion.</summary>
+    private readonly HashSet<long> _unusedSelected = new();
+
+    /// <summary>
+    /// Null for !ut (whole project). For !us, the selection's sibling families,
+    /// captured once at launch so the rescan after a delete stays on them.
+    /// </summary>
+    private UnusedTypeScope? _unusedScope;
+
+    /// <summary>Breadcrumb prefix, so a scoped report never looks like a project-wide one.</summary>
+    private string UnusedCrumb => _unusedScope == null ? "TYPES" : "TYPES IN SELECTION";
+
+    /// <summary>
+    /// !ut — scans model categories for element types with zero instances and
+    /// opens the category picker in the pane.
+    /// </summary>
+    private void LaunchUnusedTypes()
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var scan = UnusedTypeService.Scan(doc);
+
+            Dispatcher.Invoke(() => OpenUnusedReport(scan, null));
+        });
+    }
+
+    /// <summary>
+    /// !us: same report as !ut, but only for the other types of the families
+    /// the selected elements belong to (all "Basic Wall" types for a basic
+    /// wall, every type of the door family for a door, and so on).
+    /// </summary>
+    private void LaunchUnusedTypesOfSelection()
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var uidoc = uiApp.ActiveUIDocument;
+            if (uidoc == null) return;
+            var doc = uidoc.Document;
+
+            var selIds = uidoc.Selection.GetElementIds();
+            if (selIds.Count == 0)
+            {
+                Dispatcher.Invoke(() =>
+                    App.ViewModel.ShowInlineError("Select elements in the model first"));
+                return;
+            }
+
+            var scope = UnusedTypeScope.FromSelection(doc, selIds);
+            if (scope.IsEmpty)
+            {
+                Dispatcher.Invoke(() =>
+                    App.ViewModel.ShowInlineError("Nothing in the selection has a type"));
+                return;
+            }
+
+            var scan = UnusedTypeService.Scan(doc, scope);
+
+            Dispatcher.Invoke(() => OpenUnusedReport(scan, scope));
+        });
+    }
+
+    /// <summary>Shared by !ut and !us: resets the ticks and opens the category page.</summary>
+    private void OpenUnusedReport(UnusedTypeScan scan, UnusedTypeScope? scope)
+    {
+        _unusedScope = scope;
+        _unusedScan = scan;
+        _unusedSelected.Clear();
+        App.ViewModel.EnterReportMode(
+            BuildUnusedCategoryPage(scan), "TYPES", DrillUnusedTypes);
+        UpdateModePillAccent();
+        UpdateResultGrouping();
+    }
+
+    /// <summary>The unused types in one category, in scan order.</summary>
+    private List<UnusedType> TypesInCategory(string category) =>
+        _unusedScan == null
+            ? new List<UnusedType>()
+            : _unusedScan.Unused.Where(t => t.CategoryName == category).ToList();
+
+    /// <summary>Tri-state for a category: all ticked, none ticked, or some.</summary>
+    private bool? CategoryCheckState(string category)
+    {
+        var types = TypesInCategory(category);
+        if (types.Count == 0) return false;
+
+        var ticked = types.Count(t => _unusedSelected.Contains(t.ElementId));
+        if (ticked == 0) return false;
+        if (ticked == types.Count) return true;
+        return null;
+    }
+
+    /// <summary>
+    /// Space on a category row: tick the whole category, unless it is already
+    /// fully ticked, in which case clear it.
+    /// </summary>
+    private void ToggleCategory(string category)
+    {
+        var types = TypesInCategory(category);
+        var turnOn = CategoryCheckState(category) != true;
+
+        foreach (var t in types)
+        {
+            if (turnOn) _unusedSelected.Add(t.ElementId);
+            else _unusedSelected.Remove(t.ElementId);
+        }
+    }
+
+    /// <summary>The "Select all categories" row, and Ctrl+A / Ctrl+D.</summary>
+    private void SetAllUnusedCategories(bool select)
+    {
+        _unusedSelected.Clear();
+        if (select && _unusedScan != null)
+        {
+            foreach (var t in _unusedScan.Unused)
+                _unusedSelected.Add(t.ElementId);
+        }
+        App.ViewModel.RefreshCurrentReportPage();
+    }
+
+    /// <summary>Flips between everything selected and nothing selected.</summary>
+    private void ToggleAllUnusedCategories()
+    {
+        var everything = _unusedScan?.Unused.Count ?? 0;
+        SetAllUnusedCategories(_unusedSelected.Count < everything);
+    }
+
+    /// <summary>
+    /// The root page: one row per category with a tri-state tick, a select-all
+    /// row, and the run row. Space ticks a whole category, Enter opens it.
+    /// </summary>
+    private ReportPage BuildUnusedCategoryPage(UnusedTypeScan scan)
+    {
+        var page = new ReportPage
+        {
+            Hint = "Space: tick category · Enter: open · Ctrl+A / Ctrl+D: all / none · Esc: close",
+            SetAllChecks = SetAllUnusedCategories,
+        };
+
+        if (scan.Unused.Count == 0)
+        {
+            page.Breadcrumb = $"{UnusedCrumb} · 0 unused of {scan.TotalTypes}";
+            page.Rows.Add(new ReportRow
+            {
+                Text = "Nothing to purge",
+                Label = _unusedScope == null
+                    ? $"All {scan.TotalTypes} model types have at least one instance"
+                    : $"All {scan.TotalTypes} types in the selection's families are in use",
+                GroupKey = "UNUSED TYPES",
+            });
+            return page;
+        }
+
+        page.Rows.Add(new ReportRow
+        {
+            Text = "Select all categories",
+            Label = "Toggles every category at once",
+            Value = "Enter",
+            ActionKey = "unused-select-all",
+            GroupKey = "ACTIONS",
+        });
+
+        page.Rows.Add(new ReportRow
+        {
+            Text = "Delete selected types",
+            Label = "Nothing ticked yet",
+            ActionKey = "unused-delete-selected",
+            GroupKey = "ACTIONS",
+        });
+
+        var categories = scan.Unused
+            .GroupBy(t => t.CategoryName)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in categories)
+        {
+            var category = group.Key;
+            page.Rows.Add(new ReportRow
+            {
+                Text = category,
+                IsCheckable = true,
+                DrillKey = "unused-cat:" + category,
+                GroupKey = "CATEGORIES",
+                OnToggle = _ => ToggleCategory(category),
+            });
+        }
+
+        page.Recalculate = p =>
+        {
+            var total = _unusedScan?.Unused.Count ?? 0;
+            var ticked = _unusedSelected.Count;
+
+            p.Breadcrumb = $"{UnusedCrumb} · {total} unused of {scan.TotalTypes} · {ticked} selected";
+
+            var deleteRow = p.Rows[1];
+            deleteRow.Text = ticked == 0
+                ? "Delete selected types"
+                : $"Delete {ticked} selected type" + (ticked == 1 ? "" : "s");
+            deleteRow.Label = ticked == 0
+                ? "Nothing ticked yet — Space ticks the highlighted category"
+                : "Asks for confirmation first";
+            deleteRow.Value = ticked == 0 ? null : "Enter";
+
+            // Category rows: refresh tick state and the "n of m" counts, which
+            // both change when the user edits a selection one level down.
+            foreach (var row in p.Rows.Where(r => r.IsCheckable))
+            {
+                var types = TypesInCategory(row.Text);
+                var selected = types.Count(t => _unusedSelected.Contains(t.ElementId));
+
+                row.IsChecked = CategoryCheckState(row.Text);
+                row.Value = $"{selected} of {types.Count}";
+                row.Label = types.Count == 1 ? "1 unused type" : $"{types.Count} unused types";
+            }
+        };
+
+        return page;
+    }
+
+    /// <summary>Enter on a category row: the types inside it, individually tickable.</summary>
+    private ReportPage? DrillUnusedTypes(ReportRow row)
+    {
+        if (row.DrillKey == null || !row.DrillKey.StartsWith("unused-cat:")) return null;
+
+        var category = row.DrillKey.Substring("unused-cat:".Length);
+        var types = TypesInCategory(category);
+        if (types.Count == 0) return null;
+
+        var page = new ReportPage
+        {
+            BackLabel = "Categories",
+            Hint = "Space: tick type · Ctrl+A / Ctrl+D: all / none · Esc: back",
+            SetAllChecks = select =>
+            {
+                foreach (var t in types)
+                {
+                    if (select) _unusedSelected.Add(t.ElementId);
+                    else _unusedSelected.Remove(t.ElementId);
+                }
+            },
+        };
+
+        foreach (var t in types)
+        {
+            var id = t.ElementId;
+            page.Rows.Add(new ReportRow
+            {
+                Text = t.DisplayName,
+                Value = id.ToString(),
+                IsCheckable = true,
+                GroupKey = category.ToUpperInvariant(),
+                OnToggle = _ =>
+                {
+                    if (!_unusedSelected.Remove(id)) _unusedSelected.Add(id);
+                },
+            });
+        }
+
+        page.Recalculate = p =>
+        {
+            var selected = types.Count(t => _unusedSelected.Contains(t.ElementId));
+            p.Breadcrumb = $"{UnusedCrumb} · {category} — {selected} of {types.Count} selected";
+
+            foreach (var r in p.Rows.Where(r => r.IsCheckable))
+            {
+                if (long.TryParse(r.Value, out var id))
+                    r.IsChecked = _unusedSelected.Contains(id);
+            }
+        };
+
+        return page;
+    }
+
+    /// <summary>The ticked types, in scan order.</summary>
+    private List<UnusedType> SelectedUnusedTypes() =>
+        _unusedScan == null
+            ? new List<UnusedType>()
+            : _unusedScan.Unused.Where(t => _unusedSelected.Contains(t.ElementId)).ToList();
+
+    /// <summary>The yes/no page shown before any type is actually deleted.</summary>
+    private ReportPage BuildUnusedConfirmPage(List<UnusedType> targets, string backLabel)
+    {
+        var page = new ReportPage
+        {
+            Breadcrumb = $"{UnusedCrumb} · confirm deleting {targets.Count}",
+            BackLabel = backLabel,
+            Hint = "Enter: delete · Esc: cancel",
+        };
+
+        var categoryCount = targets.Select(t => t.CategoryName).Distinct().Count();
+
+        page.Rows.Add(new ReportRow
+        {
+            Text = $"Yes, delete {targets.Count} type" + (targets.Count == 1 ? "" : "s"),
+            Label = $"From {categoryCount} categor" + (categoryCount == 1 ? "y" : "ies")
+                + " · a family's last type takes the family with it · Ctrl+Z still undoes this",
+            Value = "Enter",
+            ActionKey = "unused-delete-confirmed",
+            GroupKey = "CONFIRM",
+        });
+
+        foreach (var t in targets)
+        {
+            page.Rows.Add(new ReportRow
+            {
+                Text = t.DisplayName,
+                Value = t.ElementId.ToString(),
+                GroupKey = t.CategoryName.ToUpperInvariant(),
+            });
+        }
+
+        return page;
+    }
+
+    /// <summary>Types staged by a confirm page, waiting on the user's Enter.</summary>
+    private List<UnusedType> _pendingUnusedTypes = new();
+
+    private void StageUnusedDeletion(List<UnusedType> targets, string backLabel)
+    {
+        if (targets.Count == 0) return;
+        _pendingUnusedTypes = targets;
+        App.ViewModel.PushReportPage(BuildUnusedConfirmPage(targets, backLabel));
+    }
+
+    /// <summary>Runs the staged deletion and replaces the page with the result.</summary>
+    private void RunUnusedDeletion()
+    {
+        var ids = _pendingUnusedTypes.Select(t => t.ElementId).ToList();
+        var attempted = ids.Count;
+        if (attempted == 0) return;
+
+        // Captured here, on the UI thread, so the rescan uses the scope the
+        // report was opened with (the live selection may have changed since).
+        var scope = _unusedScope;
+
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var (deleted, failed) = UnusedTypeService.Delete(doc, ids);
+
+            // Re-scan so the numbers shown afterwards are the real ones — a
+            // family deleted with its last type takes its siblings along.
+            var rescan = UnusedTypeService.Scan(doc, scope);
+
+            Dispatcher.Invoke(() =>
+            {
+                _pendingUnusedTypes.Clear();
+                _unusedSelected.Clear();
+                _unusedScan = rescan;
+
+                var page = new ReportPage
+                {
+                    Breadcrumb = $"{UnusedCrumb} · deleted {deleted} of {attempted}",
+                    Hint = "Enter: back to categories · Esc: close",
+                };
+
+                page.Rows.Add(new ReportRow
+                {
+                    Text = $"Deleted {deleted} of {attempted} type" + (attempted == 1 ? "" : "s"),
+                    Label = failed.Count == 0
+                        ? scope == null
+                            ? $"{rescan.Unused.Count} unused type(s) left in the project"
+                            : $"{rescan.Unused.Count} unused type(s) left in the selection's families"
+                        : $"{failed.Count} could not be deleted",
+                    GroupKey = "RESULT",
+                });
+
+                page.Rows.Add(new ReportRow
+                {
+                    Text = "Back to categories",
+                    Label = "Re-scanned after the delete",
+                    Value = "Enter",
+                    ActionKey = "unused-rescan",
+                    GroupKey = "RESULT",
+                });
+
+                foreach (var f in failed)
+                    page.Rows.Add(new ReportRow { Text = f, GroupKey = "FAILED" });
+
+                // Replace rather than push: the pages behind this one describe a
+                // model that no longer exists.
+                App.ViewModel.ClearReportStack();
+                App.ViewModel.ReplaceReportPage(page);
+            });
+        });
+    }
+
+    // ── In-Pane Reports: !dwg and !lp ─────────────────────────────
+
+    /// <summary>Line patterns staged for deletion by the !lp confirm page.</summary>
+    private List<(string Name, long Id)> _pendingLinePatterns = new();
+
+    /// <summary>
+    /// !dwg — collects every linked and imported CAD in the project and opens
+    /// the two-menu report inside the pane.
+    /// </summary>
+    private void LaunchCadReport()
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var report = DwgCleanupService.CollectCad(doc);
+            var pages = new CadReportPages(report);
+            var root = pages.BuildRoot();
+
+            Dispatcher.Invoke(() =>
+            {
+                App.ViewModel.EnterReportMode(root, "CAD", pages.Drill);
+                UpdateModePillAccent();
+                UpdateResultGrouping();
+            });
+        });
+    }
+
+    /// <summary>
+    /// !lp — lists the "IMPORT-" line patterns and asks for confirmation in the
+    /// pane before deleting anything.
+    /// </summary>
+    private void LaunchLinePatternCleanup()
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var patterns = DwgCleanupService.FindImportedLinePatterns(doc);
+
+            Dispatcher.Invoke(() =>
+            {
+                _pendingLinePatterns = patterns;
+                App.ViewModel.EnterReportMode(BuildLinePatternPage(patterns), "PATTERNS");
+                UpdateModePillAccent();
+                UpdateResultGrouping();
+            });
+        });
+    }
+
+    /// <summary>The !lp confirm page: the delete row on top, the victims below.</summary>
+    private static ReportPage BuildLinePatternPage(List<(string Name, long Id)> patterns)
+    {
+        if (patterns.Count == 0)
+        {
+            return new ReportPage
+            {
+                Breadcrumb = "PATTERNS · nothing to clean",
+                Hint = "Esc: close",
+                Rows =
+                {
+                    new ReportRow
+                    {
+                        Text = "No “IMPORT-” line patterns found",
+                        Label = "Nothing to clean up",
+                        GroupKey = "IMPORTED LINE PATTERNS",
+                    }
+                }
+            };
+        }
+
+        var page = new ReportPage
+        {
+            Breadcrumb = $"PATTERNS · {patterns.Count} “IMPORT-” pattern"
+                + (patterns.Count == 1 ? "" : "s"),
+            Hint = "Enter on the delete row to confirm · Esc: cancel",
+        };
+
+        page.Rows.Add(new ReportRow
+        {
+            Text = $"Delete {patterns.Count} line pattern" + (patterns.Count == 1 ? "" : "s"),
+            Label = "Affected lines fall back to solid · line styles are not touched",
+            Value = "Enter",
+            ActionKey = "purge-line-patterns",
+            GroupKey = "CONFIRM",
+        });
+
+        foreach (var (name, id) in patterns)
+        {
+            page.Rows.Add(new ReportRow
+            {
+                Text = name,
+                Value = id.ToString(),
+                GroupKey = "WILL BE DELETED",
+            });
+        }
+
+        return page;
+    }
+
+    /// <summary>Runs an actionable report row. Currently only the !lp delete.</summary>
+    private void OnReportActionRequested(ReportRow row)
+    {
+        switch (row.ActionKey)
+        {
+            case "unused-select-all":
+                ToggleAllUnusedCategories();
+                return;
+
+            case "unused-delete-selected":
+                StageUnusedDeletion(SelectedUnusedTypes(), "Categories");
+                return;
+
+            case "unused-delete-confirmed":
+                RunUnusedDeletion();
+                return;
+
+            case "unused-rescan":
+                if (_unusedScan != null)
+                    App.ViewModel.ReplaceReportPage(BuildUnusedCategoryPage(_unusedScan));
+                return;
+        }
+
+        if (row.ActionKey != "purge-line-patterns") return;
+
+        var ids = _pendingLinePatterns.Select(p => p.Id).ToList();
+        var attempted = ids.Count;
+        if (attempted == 0) return;
+
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var (deleted, failed) = DwgCleanupService.DeleteLinePatterns(doc, ids);
+
+            Dispatcher.Invoke(() =>
+            {
+                _pendingLinePatterns.Clear();
+
+                var page = new ReportPage
+                {
+                    Breadcrumb = $"PATTERNS · deleted {deleted} of {attempted}",
+                    Hint = "Esc: close",
+                };
+
+                page.Rows.Add(new ReportRow
+                {
+                    Text = $"Deleted {deleted} of {attempted} line pattern"
+                        + (attempted == 1 ? "" : "s"),
+                    Label = failed.Count == 0
+                        ? "Clean — line styles untouched"
+                        : $"{failed.Count} could not be deleted",
+                    GroupKey = "RESULT",
+                });
+
+                foreach (var f in failed)
+                {
+                    page.Rows.Add(new ReportRow
+                    {
+                        Text = f,
+                        GroupKey = "FAILED",
+                    });
+                }
+
+                App.ViewModel.ReplaceReportPage(page);
+            });
+        });
+    }
+
+    /// <summary>Selects (and reveals) the element behind a report row in the model.</summary>
+    private void OnReportElementActivated(long elementId)
+    {
+        RevitBackgroundTask.Raise(uiApp =>
+        {
+            var uidoc = uiApp.ActiveUIDocument;
+            if (uidoc == null) return;
+
+            var ids = new List<ElementId> { new ElementId(elementId) };
+            uidoc.Selection.SetElementIds(ids);
+
+            // ShowElements switches to a view the element is visible in, which
+            // for a view-specific import is the drafting view that hides it.
+            try { uidoc.ShowElements(ids); }
+            catch { /* Revit already told the user it couldn't find a good view */ }
+        });
+    }
+
+    /// <summary>Keyboard handling while an in-pane report is open.</summary>
+    private void HandleReportKeyDown(KeyEventArgs e)
+    {
+        var vm = App.ViewModel;
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                e.Handled = true;
+                // Walk back out the way we came in; leave the mode at the root.
+                if (!vm.ReportGoBack()) vm.ExitReportMode();
+                return;
+
+            case Key.Space:
+                // Only swallow Space on a checkable row, so it still types a
+                // space into the filter box everywhere else.
+                if (vm.ToggleHighlightedReportRow())
+                {
+                    e.Handled = true;
+                    ScrollHighlightedIntoView();
+                }
+                return;
+
+            case Key.A when Keyboard.Modifiers == ModifierKeys.Control:
+                e.Handled = true;
+                vm.SetAllReportChecks(true);
+                return;
+
+            case Key.D when Keyboard.Modifiers == ModifierKeys.Control:
+                e.Handled = true;
+                vm.SetAllReportChecks(false);
+                return;
+
+            case Key.Enter:
+                e.Handled = true;
+                vm.ActivateHighlightedReportRow();
+                ScrollHighlightedIntoView();
+                return;
+
+            case Key.Right:
+                e.Handled = true;
+                vm.ActivateHighlightedReportRow();
+                ScrollHighlightedIntoView();
+                return;
+
+            case Key.Left:
+                e.Handled = true;
+                vm.ReportGoBack();
+                return;
+
+            case Key.Back:
+                // Only go back on an empty filter box, so backspace still edits.
+                if (string.IsNullOrEmpty(vm.SearchText))
+                {
+                    e.Handled = true;
+                    vm.ReportGoBack();
+                }
+                return;
+
+            case Key.Up:
+                e.Handled = true;
+                vm.MoveHighlight(-1);
+                ScrollHighlightedIntoView();
+                return;
+
+            case Key.Down:
+                e.Handled = true;
+                vm.MoveHighlight(1);
+                ScrollHighlightedIntoView();
+                return;
+        }
+
+        // Everything else falls through so typing filters the current page.
     }
 
     // ── Property Inspector ────────────────────────────────────────

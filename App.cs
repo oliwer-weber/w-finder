@@ -47,24 +47,41 @@ public class App : IExternalApplication
 
     public Result OnStartup(UIControlledApplication application)
     {
-        // Initialize the ExternalEvent handler so WPF can call Revit API safely
-        RevitBackgroundTask.Initialize();
+        QuipLog.StartSession();
 
-        // Register the dockable pane (must happen during OnStartup)
-        var paneProvider = new FinderDockablePane();
-        application.RegisterDockablePane(PaneId, "Quip", paneProvider);
-
-        // Create a ribbon tab and button to toggle the pane
-        CreateRibbonButton(application);
-
-        // Install a low-level keyboard hook so the hotkey works even when
-        // a schedule view has captured keyboard input.
-        GlobalKeyboardHook.Install(() =>
+        try
         {
-            RevitBackgroundTask.Raise(FinderCommand.TogglePane);
-        });
+            // Initialize the ExternalEvent handler so WPF can call Revit API safely
+            RevitBackgroundTask.Initialize();
+            QuipLog.Write("OnStartup: RevitBackgroundTask initialised");
 
-        return Result.Succeeded;
+            // Register the dockable pane (must happen during OnStartup).
+            // Note Revit builds the pane's content lazily, well after this call.
+            var paneProvider = new FinderDockablePane();
+            application.RegisterDockablePane(PaneId, "Quip", paneProvider);
+            QuipLog.Write("OnStartup: dockable pane registered");
+
+            // Create a ribbon tab and button to toggle the pane
+            CreateRibbonButton(application);
+            QuipLog.Write("OnStartup: ribbon built");
+
+            // Install a low-level keyboard hook so the hotkey works even when
+            // a schedule view has captured keyboard input.
+            GlobalKeyboardHook.Install(() =>
+            {
+                RevitBackgroundTask.Raise(FinderCommand.TogglePane);
+            });
+            QuipLog.Write("OnStartup: keyboard hook installed");
+
+            QuipLog.Write("OnStartup: completed");
+            return Result.Succeeded;
+        }
+        catch (Exception ex)
+        {
+            // Better a Quip-less Revit than a dead one.
+            QuipLog.WriteException("OnStartup", ex);
+            return Result.Failed;
+        }
     }
 
     public Result OnShutdown(UIControlledApplication application)

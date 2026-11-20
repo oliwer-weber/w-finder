@@ -1,0 +1,17 @@
+<Project>
+  <!--
+    Imported automatically by the .NET SDK BEFORE w_finder.csproj is evaluated.
+    That early timing is the only way to move obj\ (restore output such as
+    project.assets.json) per Revit version, so 2025/2026 (net8.0) and 2027
+    (net10.0) builds never overwrite each other's restore state.
+
+    Usage: dotnet build -c Release -p:RevitVersion=2027
+  -->
+  <PropertyGroup>
+    <RevitVersion Condition="'$(RevitVersion)' == ''">2025</RevitVersion>
+
+    <!-- obj\2025\, obj\2026\, obj\2027\ -->
+    <BaseIntermediateOutputPath>obj\$(RevitVersion)\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+</Project>

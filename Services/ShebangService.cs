@@ -1,4 +1,4 @@
-using Autodesk.Revit.DB;
+﻿using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using w_finder.Models;
 
@@ -12,13 +12,21 @@ public static class ShebangService
 {
     private static List<BrowserItem>? _cached;
 
-    private static readonly (string id, string name, string category)[] Shebangs =
+    // Each shebang has a fixed negative ElementId. Favorites are stored by that
+    // id, so it must never change: give new shebangs the next unused number and
+    // never reuse the number of a removed one (-1006 was the old "qa" audit).
+    private static readonly (string id, string name, string category, long elementId)[] Shebangs =
     {
-        ("pu", "Toggle Project Units (Imperial \u2194 SI)", "Units"),
-        ("pin", "Pin All Levels, Grids & Links", "Model"),
-        ("sf", "Selection Filter", "Selection"),
-        ("pi", "Property Inspector", "Properties"),
-        ("pf", "Parameter Filter", "Selection"),
+        ("pu", "Toggle Project Units (Imperial \u2194 SI)", "Units", -1000),
+        ("pin", "Pin All Levels, Grids & Links", "Model", -1001),
+        ("sf", "Selection Filter", "Selection", -1002),
+        ("pi", "Property Inspector", "Properties", -1003),
+        ("pf", "Parameter Filter", "Selection", -1004),
+        ("gv", "Toggle Group Visibility (temporary hide)", "View", -1005),
+        ("dwg", "List Imported DWGs (not linked)", "Audit", -1007),
+        ("lp", "Clean Imported Line Patterns (IMPORT-*)", "Cleanup", -1008),
+        ("ut", "Find Unused Types (0 instances)", "Cleanup", -1009),
+        ("us", "Delete Unused Types of Selection", "Cleanup", -1010),
     };
 
     /// <summary>
@@ -30,15 +38,14 @@ public static class ShebangService
         if (_cached != null) return _cached;
 
         var items = new List<BrowserItem>();
-        long negId = -1000;
 
-        foreach (var (id, name, category) in Shebangs)
+        foreach (var (id, name, category, elementId) in Shebangs)
         {
             items.Add(new BrowserItem
             {
                 Name = name,
                 Category = category,
-                ElementId = negId--,
+                ElementId = elementId,
                 Kind = BrowserItemKind.Shebang,
                 CommandName = id,
             });
@@ -69,6 +76,17 @@ public static class ShebangService
                 break;
             case "pf":
                 // Interactive parameter filter — handled by code-behind, not here.
+                break;
+            case "gv":
+                ToggleGroupVisibility(uiApp);
+                break;
+            case "dwg":
+            case "lp":
+            case "ut":
+            case "us":
+                // All render inside the pane (LaunchCadReport,
+                // LaunchLinePatternCleanup, LaunchUnusedTypes in the
+                // code-behind), so there is nothing to do on the Revit thread here.
                 break;
         }
     }
@@ -172,5 +190,69 @@ public static class ShebangService
 
             tx.Commit();
         }
+    }
+
+    /// <summary>
+    /// Toggles temporary visibility of everything belonging to a group in the active view.
+    /// First run: temporarily hides all Group elements and their members.
+    /// Second run: clears the view's Temporary Hide/Isolate mode (same as the
+    /// "Reset Temporary Hide/Isolate" button on the view control bar).
+    /// </summary>
+    private static void ToggleGroupVisibility(UIApplication uiApp)
+    {
+        var doc = uiApp.ActiveUIDocument?.Document;
+        var view = doc?.ActiveView;
+        if (doc == null || view == null) return;
+
+        // Views that don't support temporary hide (sheets, schedules, browsers).
+        if (!view.CanUseTemporaryVisibilityModes()) return;
+
+        // If any temporary hide/isolate is already on, just clear it — this is the
+        // "toggle off" half, and it matches what the manual reset button does.
+        if (view.IsTemporaryHideIsolateActive())
+        {
+            using var reset = new Transaction(doc, "Quip: Show Groups");
+            reset.Start();
+            view.DisableTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate);
+            reset.Commit();
+            return;
+        }
+
+        // Collect group instances visible in this view, plus their members.
+        // OfClass(Group) covers both model groups and detail groups.
+        var groups = new FilteredElementCollector(doc, view.Id)
+            .OfClass(typeof(Group))
+            .Cast<Group>()
+            .ToList();
+
+        var toHide = new List<ElementId>();
+
+        foreach (var g in groups)
+        {
+            toHide.Add(g.Id);
+            foreach (var memberId in g.GetMemberIds())
+                toHide.Add(memberId);
+        }
+
+        // Nothing grouped in this view — leave the view untouched.
+        if (toHide.Count == 0) return;
+
+        // Elements that can't be hidden (pinned-in-place category exceptions, etc.)
+        // would throw, so filter down to hideable ones first.
+        var hideable = toHide
+            .Where(id =>
+            {
+                var e = doc.GetElement(id);
+                return e != null && e.CanBeHidden(view);
+            })
+            .Distinct()
+            .ToList();
+
+        if (hideable.Count == 0) return;
+
+        using var tx = new Transaction(doc, "Quip: Hide Groups");
+        tx.Start();
+        view.HideElementsTemporary(hideable);
+        tx.Commit();
     }
 }

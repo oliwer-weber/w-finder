@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -113,7 +113,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>
     /// The display text for the mode pill chip inside the search box.
     /// </summary>
-    public string ModePillText => IsInParameterFilterMode
+    public string ModePillText => IsInReportMode
+        ? ReportPillText
+        : IsInParameterFilterMode
         ? "PARAMS"
         : IsInInspectorMode
         ? "INSPECT"
@@ -133,7 +135,8 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// so the search bar is uncluttered when no scope is narrowed.
     /// </summary>
     public bool HasModePill =>
-        IsInParameterFilterMode
+        IsInReportMode
+        || IsInParameterFilterMode
         || IsInInspectorMode
         || IsInSelectionFilterMode
         || ActiveMode != ActiveMode.Browser;
@@ -141,7 +144,9 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     /// <summary>
     /// Dynamic placeholder text for the search box, based on the active mode.
     /// </summary>
-    public string PlaceholderText => IsInParameterFilterMode
+    public string PlaceholderText => IsInReportMode
+        ? "Filter rows\u2026"
+        : IsInParameterFilterMode
         ? ParamFilterFocus switch
         {
             ParamFilterField.Scope => "Pick scope\u2026",
@@ -594,6 +599,310 @@ public class FinderPaneViewModel : INotifyPropertyChanged
             HighlightedItem = Results[0];
         else
             HighlightedItem = null;
+    }
+
+    // ── In-Pane Report Mode ─────────────────────────────────────────
+    //
+    // A generic, read-only "screen stack" rendered in the results list. Used by
+    // the !dwg and !lp quips so those never have to open a TaskDialog. Pages are
+    // plain data (ReportPage/ReportRow); anything Revit-specific is built by the
+    // caller and handed in.
+
+    private bool _isInReportMode;
+    public bool IsInReportMode
+    {
+        get => _isInReportMode;
+        set
+        {
+            _isInReportMode = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ModePillText));
+            OnPropertyChanged(nameof(ReportFooterHint));
+            OnPropertyChanged(nameof(PlaceholderText));
+            OnPropertyChanged(nameof(HasModePill));
+        }
+    }
+
+    /// <summary>Pill text for the current report, e.g. "CAD" or "PATTERNS".</summary>
+    private string _reportPillText = "REPORT";
+    public string ReportPillText
+    {
+        get => _reportPillText;
+        private set { _reportPillText = value; OnPropertyChanged(); OnPropertyChanged(nameof(ModePillText)); }
+    }
+
+    private readonly Stack<ReportPage> _reportStack = new();
+    private ReportPage? _reportPage;
+
+    /// <summary>Maps synthetic result IDs back to the row they came from.</summary>
+    private readonly Dictionary<long, ReportRow> _reportRowMap = new();
+
+    /// <summary>
+    /// Builds a child page for a drillable row. Supplied when entering the mode
+    /// so page construction stays with whoever owns the data.
+    /// </summary>
+    private Func<ReportRow, ReportPage?>? _reportDrillProvider;
+
+    public string ReportFooterHint
+    {
+        get
+        {
+            if (!IsInReportMode) return string.Empty;
+            if (!string.IsNullOrEmpty(_reportPage?.Hint)) return _reportPage!.Hint;
+            return _reportStack.Count > 0
+                ? "Enter: open · Esc: back · ↑↓: navigate · Type: filter"
+                : "Enter: open · Esc: close · ↑↓: navigate · Type: filter";
+        }
+    }
+
+    /// <summary>True when Escape should pop a page instead of leaving the mode.</summary>
+    public bool ReportCanGoBack => _reportStack.Count > 0;
+
+    /// <summary>The page currently on screen. Null when not in report mode.</summary>
+    public ReportPage? CurrentReportPage => _reportPage;
+
+    /// <summary>
+    /// Drops the back history. Used after an action changes the model, when the
+    /// pages behind describe a state that no longer exists.
+    /// </summary>
+    public void ClearReportStack()
+    {
+        _reportStack.Clear();
+        OnPropertyChanged(nameof(ReportCanGoBack));
+    }
+
+    /// <summary>Fired when Enter lands on a row carrying an ActionKey.</summary>
+    public event Action<ReportRow>? ReportActionRequested;
+
+    /// <summary>Fired when Enter lands on a row carrying a Revit element ID.</summary>
+    public event Action<long>? ReportElementActivated;
+
+    /// <summary>
+    /// Opens the report surface on <paramref name="root"/>.
+    /// </summary>
+    public void EnterReportMode(ReportPage root, string pillText,
+                                Func<ReportRow, ReportPage?>? drillProvider = null)
+    {
+        _reportStack.Clear();
+        _reportPage = root;
+        _reportDrillProvider = drillProvider;
+        ReportPillText = pillText;
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+
+        IsInReportMode = true;
+        RefreshReportDisplay();
+    }
+
+    public void ExitReportMode()
+    {
+        IsInReportMode = false;
+        _reportStack.Clear();
+        _reportPage = null;
+        _reportDrillProvider = null;
+        _reportRowMap.Clear();
+
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        _debounceTimer.Stop();
+        RefreshResults();
+    }
+
+    /// <summary>Swaps the current page in place — used to show an action's result.</summary>
+    public void ReplaceReportPage(ReportPage page)
+    {
+        // A new page means the old cursor position is meaningless.
+        HighlightedItem = null;
+        _reportPage = page;
+        _searchText = string.Empty;
+        OnPropertyChanged(nameof(SearchText));
+        RefreshReportDisplay();
+    }
+
+    /// <summary>Pushes a child page, keeping the current one for Escape.</summary>
+    public void PushReportPage(ReportPage page)
+    {
+        if (_reportPage != null) _reportStack.Push(_reportPage);
+        ReplaceReportPage(page);
+        OnPropertyChanged(nameof(ReportCanGoBack));
+    }
+
+    /// <summary>Pops back one page. Returns false when already at the root.</summary>
+    public bool ReportGoBack()
+    {
+        if (_reportStack.Count == 0) return false;
+        ReplaceReportPage(_reportStack.Pop());
+        OnPropertyChanged(nameof(ReportCanGoBack));
+        return true;
+    }
+
+    /// <summary>
+    /// Handles Enter on the highlighted report row: back row, drill, action, or
+    /// select-in-model. Returns true if the row did something.
+    /// </summary>
+    public bool ActivateHighlightedReportRow()
+    {
+        if (HighlightedItem == null) return false;
+
+        if (HighlightedItem.IsBackRow) return ReportGoBack();
+
+        if (!_reportRowMap.TryGetValue(HighlightedItem.ElementId, out var row)) return false;
+
+        if (row.DrillKey != null)
+        {
+            var child = _reportDrillProvider?.Invoke(row);
+            if (child == null) return false;
+            PushReportPage(child);
+            return true;
+        }
+
+        if (row.ActionKey != null)
+        {
+            ReportActionRequested?.Invoke(row);
+            return true;
+        }
+
+        if (row.RevitElementId != 0)
+        {
+            ReportElementActivated?.Invoke(row.RevitElementId);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Toggles the checkbox on the highlighted row. Returns false when the row
+    /// isn't checkable, so the caller can let the keypress through.
+    /// </summary>
+    public bool ToggleHighlightedReportRow()
+    {
+        if (HighlightedItem == null) return false;
+        if (!_reportRowMap.TryGetValue(HighlightedItem.ElementId, out var row)) return false;
+        if (!row.IsCheckable) return false;
+
+        if (row.OnToggle != null) row.OnToggle(row);
+        else row.IsChecked = !(row.IsChecked ?? false);
+
+        RefreshReportDisplay();
+        return true;
+    }
+
+    /// <summary>
+    /// Checks or unchecks every checkable row on the current page — including
+    /// ones the search box is currently filtering out, so the count never lies.
+    /// </summary>
+    public void SetAllReportChecks(bool isChecked)
+    {
+        if (_reportPage == null) return;
+
+        if (_reportPage.SetAllChecks != null)
+        {
+            _reportPage.SetAllChecks(isChecked);
+        }
+        else
+        {
+            foreach (var row in _reportPage.Rows.Where(r => r.IsCheckable))
+                row.IsChecked = isChecked;
+        }
+
+        RefreshReportDisplay();
+    }
+
+    /// <summary>
+    /// Re-renders the current page. For callers that changed state the page
+    /// reads but didn't go through a checkbox toggle.
+    /// </summary>
+    public void RefreshCurrentReportPage() => RefreshReportDisplay();
+
+    /// <summary>Projects the current page (filtered by the search box) into Results.</summary>
+    private void RefreshReportDisplay()
+    {
+        _cachedUnifiedList = null;
+        _reportRowMap.Clear();
+
+        int prevHighlightIndex = HighlightedItem != null ? Results.IndexOf(HighlightedItem) : -1;
+
+        var page = _reportPage;
+        if (page == null)
+        {
+            Results.ReplaceAll(new List<BrowserItem>());
+            HighlightedItem = null;
+            return;
+        }
+
+        // Let the page refresh any row that depends on checkbox state.
+        page.Recalculate?.Invoke(page);
+
+        var rows = page.Rows.AsEnumerable();
+
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            var query = _searchText.ToLowerInvariant();
+            rows = rows.Where(r =>
+                r.Text.ToLowerInvariant().Contains(query)
+                || (r.Label?.ToLowerInvariant().Contains(query) ?? false)
+                || (r.Value?.ToLowerInvariant().Contains(query) ?? false));
+        }
+
+        var rowList = rows.ToList();
+
+        var items = new List<BrowserItem>();
+        long nextId = -5000;
+
+        if (page.BackLabel != null)
+        {
+            items.Add(new BrowserItem
+            {
+                Name = $"← {page.BackLabel}",
+                Category = "",
+                ElementId = nextId--,
+                Kind = BrowserItemKind.Shebang, // hides the favourite star
+                IsBackRow = true,
+                // Share the first row's section so the back row doesn't spawn
+                // an empty header above it.
+                GroupKey = rowList.Count > 0 ? rowList[0].GroupKey : "",
+            });
+        }
+
+        foreach (var row in rowList)
+        {
+            var id = nextId--;
+            items.Add(new BrowserItem
+            {
+                Name = row.Text,
+                Category = row.Value ?? "",
+                ElementId = id,
+                Kind = BrowserItemKind.Shebang,
+                DetailLabel = row.Label,
+                GroupKey = row.GroupKey,
+                // Same Segoe MDL2 glyphs the selection filter uses.
+                CheckGlyph = row.IsCheckable
+                    ? row.IsChecked switch
+                    {
+                        true => "\uE73A",   // ticked
+                        false => "\uE739",  // empty
+                        null => "\uE73C",   // partially ticked
+                    }
+                    : null,
+            });
+            _reportRowMap[id] = row;
+        }
+
+        Results.ReplaceAll(items);
+
+        StatusText = page.Breadcrumb;
+
+        // Hold the cursor in place across a re-render (checkbox toggles), and
+        // otherwise land on the first real row rather than the back row.
+        if (prevHighlightIndex >= 0 && prevHighlightIndex < items.Count)
+            HighlightedItem = items[prevHighlightIndex];
+        else
+            HighlightedItem = items.FirstOrDefault(i => !i.IsBackRow) ?? items.FirstOrDefault();
+
+        OnPropertyChanged(nameof(ReportFooterHint));
+        OnPropertyChanged(nameof(ReportCanGoBack));
     }
 
     // ── Property Inspector Mode ─────────────────────────────────────
@@ -1529,6 +1838,13 @@ public class FinderPaneViewModel : INotifyPropertyChanged
     public void RefreshResults()
     {
         _cachedUnifiedList = null;
+
+        // In report mode, route to the in-pane report surface
+        if (IsInReportMode)
+        {
+            RefreshReportDisplay();
+            return;
+        }
 
         // In parameter filter mode, route to the form-driven dropdown
         if (IsInParameterFilterMode)

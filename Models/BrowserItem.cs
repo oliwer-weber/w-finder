@@ -92,6 +92,12 @@ public class BrowserItem : INotifyPropertyChanged
     public bool IsBackRow { get; set; }
 
     /// <summary>
+    /// Small muted caption rendered above <see cref="Name"/>, used by in-pane
+    /// reports to show a field label over its value. Null for ordinary rows.
+    /// </summary>
+    public string? DetailLabel { get; set; }
+
+    /// <summary>
     /// Section/group key for result grouping (e.g. "VIEWS", "DOORS", "Architecture > Build").
     /// </summary>
     public string GroupKey { get; set; } = string.Empty;
